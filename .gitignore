@@ -1,0 +1,33 @@
+# dependencies
+/node_modules
+.pnp
+.pnp.*
+
+# secrets — NEVER commit
+.env
+.env.local
+.env.*.local
+
+# data: sqlite db + per-agent CLI config roots (HOME isolation roots)
+/data
+
+# next.js
+/.next
+/out
+next-env.d.ts
+
+# build / cache
+*.tsbuildinfo
+.turbo
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# os / editor
+.DS_Store
+*.pem
+.vscode/*
+!.vscode/extensions.json
+.idea

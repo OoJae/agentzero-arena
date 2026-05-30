@@ -1,0 +1,11 @@
+{
+  "//": "Kraken CLI native MCP server for use inside Claude Code during development.",
+  "//mode": "Read-only by default: `-s market` exposes market-data tools only. The 'all' service group exposes dangerous (order/withdraw/transfer) tools and is intentionally NOT enabled here. The paper tournament needs no credentials.",
+  "mcpServers": {
+    "kraken": {
+      "command": "kraken",
+      "args": ["mcp", "-s", "market"],
+      "env": {}
+    }
+  }
+}

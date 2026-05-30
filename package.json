@@ -1,0 +1,42 @@
+{
+  "name": "agentzero-arena",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A live, autonomous, multi-agent trading tournament on the Kraken CLI.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "concurrently -n web,worker -c cyan,magenta \"next dev -p 3000\" \"tsx watch worker/index.ts\"",
+    "dev:web": "next dev -p 3000",
+    "dev:worker": "tsx watch worker/index.ts",
+    "worker": "tsx worker/index.ts",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "verify-cli": "tsx scripts/verify-cli.ts",
+    "audit-dump": "tsx scripts/audit-dump.ts",
+    "validate": "tsx scripts/validate.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.65.0",
+    "next": "^15.5.4",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.13",
+    "@types/node": "^22.10.5",
+    "@types/react": "^19.1.13",
+    "@types/react-dom": "^19.1.9",
+    "concurrently": "^9.1.2",
+    "tailwindcss": "^4.1.13",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  }
+}
