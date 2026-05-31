@@ -25,6 +25,9 @@ export const MACRO_HEDGE_CONFIG: AgentConfig = {
   maxLeverage: 3,
   startingBalance: 10_000,
   startingCurrency: "USD",
+  maxDrawdownPct: 12,
+  maxExposurePct: 60,
+  maxOrdersPerMin: 3,
 };
 
 const SYSTEM_PROMPT = `You are the **Macro-Hedge** agent in a live, multi-agent trading arena on the Kraken CLI, trading an EQUITY-INDEX perpetual (S&P 500, PF_SPXUSD).

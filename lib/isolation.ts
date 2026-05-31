@@ -8,7 +8,7 @@
  * `VirtualProvider` (fallback): simulates fills/PnL from a PriceFeed; works offline.
  * Spot is long-only (cash model); futures supports shorts (signed-position PnL model).
  */
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   futuresPaperBuy,
@@ -46,6 +46,8 @@ export interface IsolationProvider {
   /** Execute a non-hold proposal at/around refPrice. Returns the fill, or null if skipped. */
   execute(agent: AgentConfig, proposal: Proposal, refPrice: number): Promise<Fill | null>;
   status(agent: AgentConfig): Promise<PortfolioStatus>;
+  /** Close ALL positions (used by the Risk Marshal when benching). Returns the closing fills. */
+  flatten(agent: AgentConfig): Promise<Fill[]>;
 }
 
 const SPOT_FEE_RATE = 0.0026; // Kraken Starter taker (spot paper default)
@@ -64,7 +66,9 @@ export class PaperCliProvider implements IsolationProvider {
   }
 
   async init(agent: AgentConfig): Promise<void> {
-    mkdirSync(this.homeFor(agent), { recursive: true });
+    const home = this.homeFor(agent);
+    mkdirSync(home, { recursive: true });
+    clearStaleLocks(home); // remove leftover *_state.json.lock from a crashed/killed run
     const marker = resolve(this.dataDir, "agents", agent.id, ".initialized");
     if (existsSync(marker)) return; // idempotent across restarts
     const env = this.envFor(agent);
@@ -118,7 +122,9 @@ export class PaperCliProvider implements IsolationProvider {
     const s: PaperStatus = await paperStatus(env);
     let positions: Record<string, number> = {};
     try {
-      positions = await paperBalance(env);
+      // paper balance is keyed by ASSET (ETH, XBT, USD…) — normalize to the agent's
+      // PAIR keys (ETHUSD…) so `positions[symbol]` works for holding/exposure checks.
+      positions = normalizeSpotPositions(await paperBalance(env), agent.startingCurrency);
     } catch {
       positions = {};
     }
@@ -129,6 +135,69 @@ export class PaperCliProvider implements IsolationProvider {
       positions,
     };
   }
+
+  async flatten(agent: AgentConfig): Promise<Fill[]> {
+    const env = this.envFor(agent);
+    const { positions } = await this.status(agent); // pair-keyed (spot) / symbol-keyed (futures)
+    const fills: Fill[] = [];
+    for (const [symbol, signed] of Object.entries(positions)) {
+      if (Math.abs(signed) <= 1e-9) continue;
+      try {
+        let raw: unknown;
+        let side: "buy" | "sell";
+        if (agent.venue === "futures") {
+          // close = opposite side of the signed position, reduce-only
+          side = signed > 0 ? "sell" : "buy";
+          const opts = { leverage: agent.maxLeverage, type: "market" as const, reduceOnly: true };
+          raw =
+            side === "sell"
+              ? await futuresPaperSell(env, symbol, Math.abs(signed), opts)
+              : await futuresPaperBuy(env, symbol, Math.abs(signed), opts);
+        } else {
+          side = "sell"; // spot is long-only — sell the full holding
+          raw = await paperSell(env, symbol, Math.abs(signed), { type: "market" });
+        }
+        const feeRate = agent.venue === "futures" ? FUTURES_FEE_RATE : SPOT_FEE_RATE;
+        const { price, fee } = parseFill(raw, NaN, Math.abs(signed), feeRate);
+        fills.push({ side, symbol, price, size: Math.abs(signed), fee, mode: "paper", raw });
+      } catch {
+        /* best-effort: skip a position that won't close (recover next bench) */
+      }
+    }
+    return fills;
+  }
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+/** Remove leftover *_state.json.lock files from a crashed/killed run (one worker owns the HOME). */
+function clearStaleLocks(home: string): void {
+  const dir = resolve(home, "Library", "Application Support", "kraken", "paper");
+  try {
+    for (const f of readdirSync(dir)) {
+      if (f.endsWith(".lock")) rmSync(resolve(dir, f), { force: true });
+    }
+  } catch {
+    /* paper dir not created yet — nothing to clear */
+  }
+}
+
+const ASSET_ALIAS: Record<string, string> = { XBT: "BTC", XXBT: "BTC", XETH: "ETH", XSOL: "SOL" };
+/** Map a Kraken asset code + quote to a trading pair, or null for the quote currency itself. */
+function assetToPair(asset: string, quote: string): string | null {
+  const a = (ASSET_ALIAS[asset] ?? asset).toUpperCase();
+  const q = quote.toUpperCase().replace(/^Z/, ""); // ZUSD → USD
+  if (a === q || a === `Z${q}`) return null; // cash, not a position
+  return `${a}${q}`;
+}
+/** Normalize asset-keyed paper balances (ETH, XBT…) to pair keys (ETHUSD…), dropping cash. */
+function normalizeSpotPositions(byAsset: Record<string, number>, quote: string): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [asset, qty] of Object.entries(byAsset)) {
+    if (!(qty > 1e-9)) continue;
+    const pair = assetToPair(asset, quote);
+    if (pair) out[pair] = (out[pair] ?? 0) + qty;
+  }
+  return out;
 }
 
 async function parseFuturesPositions(p: Promise<unknown>): Promise<Record<string, number>> {
@@ -288,6 +357,27 @@ export class VirtualProvider implements IsolationProvider {
       if (Number.isFinite(px)) unrealized += pos.size * (px - pos.entry);
     }
     return { equity: a.startingBalance + a.realized + unrealized, startingBalance: a.startingBalance, trades: a.trades, positions };
+  }
+
+  async flatten(agent: AgentConfig): Promise<Fill[]> {
+    const a = this.acct(agent);
+    const fills: Fill[] = [];
+    if (a.kind === "spot") {
+      for (const [symbol, qty] of [...a.positions]) {
+        if (qty <= 1e-12) continue;
+        const price = await this.feed.getPrice(symbol);
+        const f = await this.execute(agent, { action: "sell", symbol, size: qty, confidence: 1, rationale: "flatten" }, price);
+        if (f) fills.push(f);
+      }
+    } else {
+      for (const [symbol, pos] of [...a.positions]) {
+        if (Math.abs(pos.size) <= 1e-12) continue;
+        const price = await this.feed.getPrice(symbol);
+        const f = await this.execute(agent, { action: pos.size > 0 ? "sell" : "buy", symbol, size: Math.abs(pos.size), confidence: 1, rationale: "flatten" }, price);
+        if (f) fills.push(f);
+      }
+    }
+    return fills;
   }
 }
 

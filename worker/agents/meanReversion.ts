@@ -21,6 +21,9 @@ export const MEAN_REVERSION_CONFIG: AgentConfig = {
   maxLeverage: 1,
   startingBalance: 10_000,
   startingCurrency: "USD",
+  maxDrawdownPct: 10,
+  maxExposurePct: 60,
+  maxOrdersPerMin: 4,
 };
 
 const SYSTEM_PROMPT = `You are the **Mean-Reversion** agent in a live, multi-agent trading arena on the Kraken CLI.

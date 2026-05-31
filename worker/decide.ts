@@ -193,4 +193,41 @@ function clampProposal(p: Proposal, input: DecideInput): Proposal {
   };
 }
 
+/**
+ * One-sentence LLM narration of a Risk Marshal action for the public event feed.
+ * Returns null when no key / on error — the deterministic event text already stands,
+ * so this never blocks or breaks benching (it enriches the event asynchronously).
+ */
+export async function narrateRiskEvent(input: {
+  agent: AgentConfig;
+  reason: string;
+  flattened: number;
+}): Promise<string | null> {
+  const c = client();
+  if (!c) return null;
+  try {
+    const resp = await c.messages.create({
+      model: getModel(),
+      max_tokens: getMaxTokens(),
+      system: systemParam(
+        "You are the Risk Marshal of a live trading arena. In ONE terse, factual sentence (max 20 words, no emojis), narrate an enforcement action for a public event feed.",
+      ),
+      messages: [
+        {
+          role: "user",
+          content: `Agent ${input.agent.name} (${input.agent.strategy}) was benched: ${input.reason}. ${input.flattened} position(s) flattened, kill-switch armed. Write the one-sentence narration.`,
+        },
+      ],
+    });
+    const text = resp.content
+      .filter((b): b is Anthropic.TextBlock => b.type === "text")
+      .map((b) => b.text)
+      .join(" ")
+      .trim();
+    return text || null;
+  } catch {
+    return null;
+  }
+}
+
 export { ProposalSchema, getModel, isCustom };

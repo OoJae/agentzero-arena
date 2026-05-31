@@ -232,10 +232,16 @@ export function insertRiskEvent(
   type: string,
   detail: string,
   actionTaken: string | null,
-): void {
-  db.prepare(
-    `INSERT INTO risk_events (agent_id, ts, type, detail, action_taken) VALUES (?, ?, ?, ?, ?)`,
-  ).run(agentId, ts, type, detail, actionTaken);
+): number {
+  const info = db
+    .prepare(`INSERT INTO risk_events (agent_id, ts, type, detail, action_taken) VALUES (?, ?, ?, ?, ?)`)
+    .run(agentId, ts, type, detail, actionTaken);
+  return Number(info.lastInsertRowid);
+}
+
+/** Enrich a risk event's detail (e.g. with async LLM narration) after the fact. */
+export function updateRiskEventDetail(db: DatabaseSync, id: number, detail: string): void {
+  db.prepare(`UPDATE risk_events SET detail = ? WHERE id = ?`).run(detail, id);
 }
 
 // ─── Read models for the dashboard ──────────────────────────────────────────

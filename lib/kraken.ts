@@ -195,10 +195,14 @@ export function interpretResult(res: RawResult, opts: { json?: boolean } = {}): 
     ? (parsed as KrakenErrorEnvelope)
     : null);
   const category = mapCategory(envelope, stdout + " " + stderr);
-  const retryable = envelope?.retryable ?? RETRYABLE_DEFAULT[category];
+  const message = envelope?.message ?? `kraken exited ${exit ?? "null"}`;
+  // The paper-state lock is a brief transient ("Try again shortly") — make it retryable
+  // even though its category is `validation`, so concurrent calls self-heal.
+  const locked = /locked by another process/i.test(message);
+  const retryable = locked ? true : (envelope?.retryable ?? RETRYABLE_DEFAULT[category]);
   throw new KrakenError({
     category,
-    message: envelope?.message ?? `kraken exited ${exit ?? "null"}`,
+    message,
     retryable,
     exitCode: exit,
     suggestion: envelope?.suggestion,
@@ -474,12 +478,14 @@ interface FuturesOrderOpts {
   leverage: number; // REQUIRED by the CLI (validation error otherwise)
   type?: "market" | "limit";
   price?: number;
+  reduceOnly?: boolean; // close-only (for flattening a position)
 }
 
 function futuresOrderArgs(side: "buy" | "sell", symbol: string, size: number, opts: FuturesOrderOpts): string[] {
   const args = ["futures", "paper", side, symbol, String(size), "--leverage", String(opts.leverage)];
   args.push("--type", opts.type ?? "market");
   if (opts.price != null) args.push("--price", String(opts.price));
+  if (opts.reduceOnly) args.push("--reduce-only");
   return args;
 }
 

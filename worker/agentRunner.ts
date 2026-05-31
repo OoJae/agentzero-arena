@@ -12,10 +12,11 @@
  */
 import type { DatabaseSync } from "node:sqlite";
 import { appendAudit } from "../lib/audit.js";
-import { getPeakEquity, insertDecision, insertEquitySnapshot, insertTrade } from "../lib/db.js";
+import { getPeakEquity, insertDecision, insertEquitySnapshot, insertRiskEvent, insertTrade } from "../lib/db.js";
 import type { IsolationProvider, PortfolioStatus } from "../lib/isolation.js";
 import type { PriceFeed } from "../lib/priceFeed.js";
-import type { AgentConfig, Proposal, Verdict } from "../lib/types.js";
+import type { AgentConfig, Proposal } from "../lib/types.js";
+import type { RiskMarshal } from "./riskMarshal.js";
 
 /** What an agent assembles each tick. `fallback` captures the strategy features. */
 export interface TickContext {
@@ -41,6 +42,7 @@ export interface RunDeps {
   db: DatabaseSync;
   feed: PriceFeed;
   isolation: IsolationProvider;
+  marshal: RiskMarshal;
   intervalMinutes: number;
   candleCount: number;
   decide: (args: {
@@ -64,7 +66,7 @@ export interface TickResult {
 }
 
 export async function runTick(def: AgentDefinition, deps: RunDeps): Promise<TickResult> {
-  const { db, feed, isolation, intervalMinutes, candleCount, decide } = deps;
+  const { db, feed, isolation, marshal, intervalMinutes, candleCount, decide } = deps;
   const config = def.config;
   const ts = Date.now();
 
@@ -85,17 +87,18 @@ export async function runTick(def: AgentDefinition, deps: RunDeps): Promise<Tick
     fallback: () => ctx.fallback(maxSize, status),
   });
 
-  // ── Phase 1/2 pre-trade check: size clamp only (full Risk Marshal = Phase 3) ──
-  const clampedSize = Math.min(proposal.size, maxSize);
-  const verdict: Verdict = {
-    approved: proposal.action !== "hold" && clampedSize > 0,
-    reason:
-      proposal.action === "hold" ? "agent chose to hold" : clampedSize > 0 ? "pre-trade size clamp ok" : "size clamped to zero",
-    clampedSize,
-  };
+  // ── Risk Marshal pre-trade veto (deterministic) ──
+  const verdict = marshal.preTradeCheck(config, proposal, status, primaryPrice);
+  const clampedSize = verdict.clampedSize;
 
   const decisionId = insertDecision(db, config.id, ts, ctx.featuresJson, proposal, verdict);
   appendAudit(db, "decision", { agentId: config.id, ts, features: safeJson(ctx.featuresJson), proposal, verdict }, ts);
+
+  // Surface a blocked trade (not a plain hold) as a visible VETO event.
+  if (!verdict.approved && proposal.action !== "hold") {
+    insertRiskEvent(db, config.id, ts, "VETO", `${config.name} ${proposal.action} ${proposal.symbol} vetoed — ${verdict.reason}`, null);
+    appendAudit(db, "risk_veto", { agentId: config.id, proposal, reason: verdict.reason }, ts);
+  }
 
   let filled = false;
   if (verdict.approved) {
@@ -164,8 +167,11 @@ export async function recordSnapshot(
   return { equity: post.equity, pnlPct, drawdownPct };
 }
 
-export async function snapshotAgent(config: AgentConfig, deps: Pick<RunDeps, "db" | "isolation">): Promise<void> {
-  await recordSnapshot(deps.db, deps.isolation, config);
+export async function snapshotAgent(
+  config: AgentConfig,
+  deps: Pick<RunDeps, "db" | "isolation">,
+): Promise<{ equity: number; pnlPct: number; drawdownPct: number }> {
+  return recordSnapshot(deps.db, deps.isolation, config);
 }
 
 function safeJson(s: string): unknown {

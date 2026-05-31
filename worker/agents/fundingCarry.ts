@@ -22,6 +22,9 @@ export const FUNDING_CARRY_CONFIG: AgentConfig = {
   maxLeverage: 3,
   startingBalance: 10_000,
   startingCurrency: "USD",
+  maxDrawdownPct: 6, // tight — carry should be low directional risk
+  maxExposurePct: 50,
+  maxOrdersPerMin: 3,
 };
 
 const SYSTEM_PROMPT = `You are the **Funding-Carry** agent in a live, multi-agent trading arena on the Kraken CLI, trading perpetual futures.

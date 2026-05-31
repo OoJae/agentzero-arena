@@ -62,10 +62,14 @@ export interface AgentConfig {
   strategy: StrategyId;
   venue: Venue; // spot → `kraken paper`; futures → `kraken futures paper`
   allowedSymbols: string[];
-  maxPositionPct: number; // hard cap: max % of equity in a single position
+  maxPositionPct: number; // hard cap: max fraction of equity in a single position (0..1)
   maxLeverage: number;
   startingBalance: number;
   startingCurrency: string; // e.g. "USD"
+  // ─── Risk profile (enforced by the Risk Marshal, BUILD.md §6) ───
+  maxDrawdownPct: number; // bench if drawdown from peak worse than −this% (e.g. 10)
+  maxExposurePct: number; // gross notional cap as % of equity (e.g. 60)
+  maxOrdersPerMin: number; // order-rate cap
 }
 
 // ─── Futures market data (verified shapes from `kraken futures ticker`) ───────

@@ -1,26 +1,30 @@
 /**
  * AgentZero Arena — agent runtime (long-lived worker).
  *
- * Phase 1: boot one isolated Momentum agent and run its decision loop on a staggered
- * tick. Each tick writes decisions/trades/equity to SQLite + the hash-chained audit
- * log; the Next.js dashboard reads that DB over SSE. Phase 2 adds the other three
- * agents to the `AGENTS` array — the scheduler already fans out generically.
+ * Decoupled scheduler: a fast snapshot loop (mark-to-market equity, NO LLM) keeps the
+ * leaderboard live while a slower, non-overlapping decision loop runs the LLM. A
+ * per-agent CLI mutex (`busy`) serializes ALL CLI access for an agent — decision,
+ * snapshot, and bench — because `futures paper` locks its state file. The Risk Marshal
+ * vetoes orders pre-trade and benches agents that breach their drawdown profile; an
+ * operator can also force a bench on cue via `data/force-bench.json` (scripts/force-breach.ts).
  *
- * Not serverless. Run via `tsx worker/index.ts` (or `pnpm dev` for web+worker).
+ * Not serverless. Run via `tsx worker/index.ts` (or `pnpm dev` for web+worker). Run ONE worker.
  */
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { resolve } from "node:path";
 import { appendAudit } from "../lib/audit.js";
 import { getDb, setAgentStatus, upsertAgent } from "../lib/db.js";
 import { createIsolation } from "../lib/isolation.js";
 import { createPriceFeed } from "../lib/priceFeed.js";
 import { runTick, snapshotAgent, type AgentDefinition, type RunDeps } from "./agentRunner.js";
-import { claudeDecide } from "./decide.js";
+import { claudeDecide, narrateRiskEvent } from "./decide.js";
+import { RiskMarshal } from "./riskMarshal.js";
 import { momentumAgent } from "./agents/momentum.js";
 import { meanReversionAgent } from "./agents/meanReversion.js";
 import { fundingCarryAgent } from "./agents/fundingCarry.js";
 import { macroHedgeAgent } from "./agents/macroHedge.js";
 
-// Load .env then .env.local (local overrides). Paper mode needs no secrets, so a
-// missing file is fine. Node 22+ builtin; no dotenv dependency.
+// Load .env then .env.local (local overrides). Paper mode needs no secrets.
 for (const f of [".env", ".env.local"]) {
   try {
     process.loadEnvFile(f);
@@ -34,8 +38,8 @@ const SNAPSHOT_SECONDS = Number(process.env.ARENA_SNAPSHOT_SECONDS ?? 5); // fas
 const OHLC_INTERVAL_MIN = Number(process.env.ARENA_OHLC_INTERVAL ?? 60);
 const CANDLE_COUNT = Number(process.env.ARENA_CANDLE_COUNT ?? 50);
 const DATA_DIR = process.env.ARENA_DATA_DIR ?? "./data";
+const FORCE_BENCH_FILE = resolve(DATA_DIR, "force-bench.json");
 
-// Phase 2 full roster: 2 spot (Momentum, Mean-Reversion) + 2 futures (Funding-Carry, Macro-Hedge).
 const AGENTS: AgentDefinition[] = [momentumAgent, meanReversionAgent, fundingCarryAgent, macroHedgeAgent];
 
 function log(msg: string, extra?: Record<string, unknown>) {
@@ -45,6 +49,8 @@ function log(msg: string, extra?: Record<string, unknown>) {
 async function main() {
   const feed = createPriceFeed();
   const isolation = createIsolation(feed, undefined, DATA_DIR);
+  const db = getDb();
+  const marshal = new RiskMarshal(db, isolation, narrateRiskEvent);
 
   log("booting AgentZero Arena worker", {
     node: process.version,
@@ -53,44 +59,39 @@ async function main() {
     anthropicKey: process.env.ANTHROPIC_API_KEY ? "set" : "absent (deterministic fallback)",
     tickSeconds: TICK_SECONDS,
   });
-
-  const db = getDb();
   log("database ready (WAL)");
 
   const deps: RunDeps = {
     db,
     feed,
     isolation,
+    marshal,
     intervalMinutes: OHLC_INTERVAL_MIN,
     candleCount: CANDLE_COUNT,
     decide: claudeDecide,
   };
 
-  // Register + isolate each agent before its first tick.
+  // Register + isolate each agent before its first tick (fresh ACTIVE each boot).
   for (const def of AGENTS) {
     upsertAgent(db, def.config);
     setAgentStatus(db, def.config.id, "ACTIVE");
     await isolation.init(def.config);
     log(`agent ready: ${def.config.name} (${def.config.strategy})`, {
       symbols: def.config.allowedSymbols,
-      startingBalance: def.config.startingBalance,
+      risk: { ddPct: def.config.maxDrawdownPct, expPct: def.config.maxExposurePct, ordersMin: def.config.maxOrdersPerMin },
     });
   }
-  appendAudit(db, "arena_start", {
-    agents: AGENTS.map((a) => a.config.id),
-    isolation: isolation.kind,
-    priceFeed: feed.kind,
-  });
+  appendAudit(db, "arena_start", { agents: AGENTS.map((a) => a.config.id), isolation: isolation.kind, priceFeed: feed.kind });
 
   const timers: NodeJS.Timeout[] = [];
   let running = true;
-  const inFlight = new Set<string>(); // agents with a decision currently running
+  const busy = new Set<string>(); // per-agent CLI mutex: decision | snapshot | bench in progress
 
-  // Slow loop: full LLM decision + execute. Guarded so a slow model (MiMo ~25s)
-  // never overlaps itself for the same agent.
+  // Slow loop: full LLM decision + execute. Skipped if the agent's CLI is busy or benched.
   async function decisionTick(def: AgentDefinition) {
-    if (!running || inFlight.has(def.config.id)) return;
-    inFlight.add(def.config.id);
+    const id = def.config.id;
+    if (!running || busy.has(id) || marshal.isBenched(id)) return;
+    busy.add(id);
     try {
       const r = await runTick(def, deps);
       log(
@@ -99,25 +100,57 @@ async function main() {
     } catch (err) {
       log(`${def.config.name}: decision error — ${(err as Error).message}`);
     } finally {
-      inFlight.delete(def.config.id);
+      busy.delete(id);
     }
   }
 
-  // Fast loop: mark-to-market equity snapshots for every agent (NO LLM) so the
-  // leaderboard stays live while decisions are in flight. Guarded against overlap.
+  // Operator-triggered bench (scripts/force-breach.ts writes data/force-bench.json).
+  async function checkForceBench() {
+    if (!existsSync(FORCE_BENCH_FILE)) return;
+    let payload: { agentId?: string; reason?: string };
+    try {
+      payload = JSON.parse(readFileSync(FORCE_BENCH_FILE, "utf8"));
+    } catch {
+      rmSync(FORCE_BENCH_FILE, { force: true });
+      return;
+    }
+    const def = AGENTS.find((a) => a.config.id === payload.agentId);
+    if (!def || marshal.isBenched(def.config.id)) {
+      rmSync(FORCE_BENCH_FILE, { force: true });
+      return;
+    }
+    if (busy.has(def.config.id)) return; // CLI busy — retry next tick (keep the file)
+    busy.add(def.config.id);
+    try {
+      await marshal.bench(def.config, payload.reason || "manual breach (demo)");
+      rmSync(FORCE_BENCH_FILE, { force: true });
+      log(`Risk Marshal: ⛔ BENCHED ${def.config.name} — ${payload.reason || "manual breach (demo)"}`);
+    } finally {
+      busy.delete(def.config.id);
+    }
+  }
+
+  // Fast loop: equity snapshots (NO LLM) + the Marshal's drawdown monitor.
   let snapshotBusy = false;
   async function snapshotTick() {
     if (!running || snapshotBusy) return;
     snapshotBusy = true;
     try {
+      await checkForceBench();
       for (const def of AGENTS) {
-        // Skip agents mid-decision: their CLI state is in use (futures paper locks
-        // it), and the decision writes a fresh snapshot when it finishes.
-        if (inFlight.has(def.config.id)) continue;
+        const id = def.config.id;
+        if (busy.has(id) || marshal.isBenched(id)) continue;
+        busy.add(id);
         try {
-          await snapshotAgent(def.config, deps);
+          const snap = await snapshotAgent(def.config, deps);
+          const benched = await marshal.postTradeMonitor(def.config, snap);
+          if (benched) {
+            log(`Risk Marshal: ⛔ BENCHED ${def.config.name} — drawdown ${snap.drawdownPct.toFixed(1)}% breached −${def.config.maxDrawdownPct}%`);
+          }
         } catch {
-          /* transient (e.g. rate limit / lock) — next tick recovers */
+          /* transient (rate limit / lock) — next tick recovers */
+        } finally {
+          busy.delete(id);
         }
       }
     } finally {

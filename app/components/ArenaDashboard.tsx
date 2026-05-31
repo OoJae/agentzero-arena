@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentSnapshot, ArenaState } from "@/lib/types";
 import EquityChart, { STRATEGY_COLOR } from "./EquityChart";
+import EventLog from "./EventLog";
 
 const STRATEGY_LABEL: Record<string, string> = {
   momentum: "Momentum",
@@ -55,6 +56,7 @@ export default function ArenaDashboard() {
 
   const agents = state?.agents ?? [];
   const leader = agents[0] ?? null;
+  const anyBenched = agents.some((a) => a.status === "BENCHED");
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-10">
@@ -75,6 +77,11 @@ export default function ArenaDashboard() {
             {connected ? "LIVE" : "connecting…"}
           </span>
           <AuditBadge ok={state?.auditVerified ?? null} />
+          {anyBenched && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5 text-[11px] font-medium text-red-300 ring-1 ring-red-500/30">
+              ⛔ kill-switch armed
+            </span>
+          )}
         </div>
       </header>
 
@@ -115,6 +122,13 @@ export default function ArenaDashboard() {
           </tbody>
         </table>
       </section>
+
+      {agents.length > 0 && (
+        <section className="mt-6 rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
+          <h2 className="mb-2 px-1 text-xs uppercase tracking-[0.15em] text-neutral-500">Risk Marshal · event log</h2>
+          <EventLog events={state?.events ?? []} />
+        </section>
+      )}
 
       {agents.length > 0 && (
         <section className="mt-6 rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">

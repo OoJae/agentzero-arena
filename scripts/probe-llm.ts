@@ -97,6 +97,9 @@ async function main() {
     maxLeverage: 1,
     startingBalance: 10000,
     startingCurrency: "USD",
+    maxDrawdownPct: 10,
+    maxExposurePct: 60,
+    maxOrdersPerMin: 4,
   };
   const proposal = await claudeDecide({
     agent,
