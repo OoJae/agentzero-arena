@@ -6,7 +6,15 @@
  * reasons over THESE numbers — never over imagined future prices. Pure functions,
  * fully unit-tested.
  */
-import type { Candle, MeanReversionFeatures, MomentumFeatures } from "./types.js";
+import type {
+  Candle,
+  FundingFeatures,
+  FundingPoint,
+  FuturesTickerData,
+  MacroFeatures,
+  MeanReversionFeatures,
+  MomentumFeatures,
+} from "./types.js";
 
 export function mean(xs: number[]): number {
   if (xs.length === 0) return 0;
@@ -150,4 +158,35 @@ export function computeMeanReversionFeatures(
   const percentB = upper > lower ? (price - lower) / (upper - lower) : 0.5;
   const smaDeviation = sma !== 0 ? (price - sma) / sma : 0;
   return { symbol, price, zScore, percentB, rsi: rsi(closes, params.rsiPeriod), smaDeviation };
+}
+
+// ─── Funding-Carry features (from futures ticker + optional history) ──────────
+export function computeFundingFeatures(
+  ticker: FuturesTickerData,
+  history?: FundingPoint[],
+): FundingFeatures {
+  const recent = history && history.length ? history.slice(-8) : [];
+  const fundingTrend = recent.length ? mean(recent.map((p) => p.fundingRate)) : ticker.fundingRate;
+  return {
+    symbol: ticker.symbol,
+    price: ticker.last,
+    fundingRate: ticker.fundingRate,
+    fundingPrediction: ticker.fundingRatePrediction,
+    fundingTrend,
+    change24h: ticker.change24h,
+  };
+}
+
+// ─── Macro-Hedge features (equity index vs crypto cross-asset) ────────────────
+export function computeMacroFeatures(
+  index: FuturesTickerData,
+  crypto: FuturesTickerData,
+): MacroFeatures {
+  return {
+    symbol: index.symbol,
+    price: index.last,
+    indexChange24h: index.change24h,
+    cryptoChange24h: crypto.change24h,
+    divergence: crypto.change24h - index.change24h,
+  };
 }

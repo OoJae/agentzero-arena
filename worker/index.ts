@@ -16,6 +16,8 @@ import { runTick, snapshotAgent, type AgentDefinition, type RunDeps } from "./ag
 import { claudeDecide } from "./decide.js";
 import { momentumAgent } from "./agents/momentum.js";
 import { meanReversionAgent } from "./agents/meanReversion.js";
+import { fundingCarryAgent } from "./agents/fundingCarry.js";
+import { macroHedgeAgent } from "./agents/macroHedge.js";
 
 // Load .env then .env.local (local overrides). Paper mode needs no secrets, so a
 // missing file is fine. Node 22+ builtin; no dotenv dependency.
@@ -33,8 +35,8 @@ const OHLC_INTERVAL_MIN = Number(process.env.ARENA_OHLC_INTERVAL ?? 60);
 const CANDLE_COUNT = Number(process.env.ARENA_CANDLE_COUNT ?? 50);
 const DATA_DIR = process.env.ARENA_DATA_DIR ?? "./data";
 
-// Phase 2 roster (Funding-Carry + Macro-Hedge land next slice).
-const AGENTS: AgentDefinition[] = [momentumAgent, meanReversionAgent];
+// Phase 2 full roster: 2 spot (Momentum, Mean-Reversion) + 2 futures (Funding-Carry, Macro-Hedge).
+const AGENTS: AgentDefinition[] = [momentumAgent, meanReversionAgent, fundingCarryAgent, macroHedgeAgent];
 
 function log(msg: string, extra?: Record<string, unknown>) {
   console.log(`[worker ${new Date().toISOString()}] ${msg}`, extra ? JSON.stringify(extra) : "");
@@ -102,15 +104,24 @@ async function main() {
   }
 
   // Fast loop: mark-to-market equity snapshots for every agent (NO LLM) so the
-  // leaderboard stays live while decisions are in flight.
+  // leaderboard stays live while decisions are in flight. Guarded against overlap.
+  let snapshotBusy = false;
   async function snapshotTick() {
-    if (!running) return;
-    for (const def of AGENTS) {
-      try {
-        await snapshotAgent(def.config, deps);
-      } catch {
-        /* transient (e.g. rate limit) — next tick recovers */
+    if (!running || snapshotBusy) return;
+    snapshotBusy = true;
+    try {
+      for (const def of AGENTS) {
+        // Skip agents mid-decision: their CLI state is in use (futures paper locks
+        // it), and the decision writes a fresh snapshot when it finishes.
+        if (inFlight.has(def.config.id)) continue;
+        try {
+          await snapshotAgent(def.config, deps);
+        } catch {
+          /* transient (e.g. rate limit / lock) — next tick recovers */
+        }
       }
+    } finally {
+      snapshotBusy = false;
     }
   }
   timers.push(setInterval(() => void snapshotTick(), SNAPSHOT_SECONDS * 1000));

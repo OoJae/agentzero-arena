@@ -11,7 +11,7 @@
  *
  * Live methods exist but MUST only run during the explicit finale (see safety rules).
  */
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -206,23 +206,35 @@ export function interpretResult(res: RawResult, opts: { json?: boolean } = {}): 
   });
 }
 
-function runOnce(args: string[], opts: RunOpts = {}): unknown {
-  const finalArgs = opts.json === false ? args : withJson(args);
-  const res = spawnSync(KRAKEN_BIN, finalArgs, {
-    env: buildEnv(opts.env, opts.finale),
-    encoding: "utf8",
-    timeout: opts.timeoutMs ?? 25_000,
-    maxBuffer: 16 * 1024 * 1024,
+/** Spawn `kraken` asynchronously (NON-blocking — never use spawnSync; it stalls the
+ *  event loop and starves concurrent agents + async LLM calls). Collects stdout/stderr. */
+function spawnCollect(args: string[], opts: RunOpts): Promise<RawResult> {
+  return new Promise((resolve) => {
+    const child = spawn(KRAKEN_BIN, args, { env: buildEnv(opts.env, opts.finale) });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const finish = (r: RawResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(r);
+    };
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      finish({ stdout, stderr, status: null, spawnError: { message: "kraken call timed out" } });
+    }, opts.timeoutMs ?? 25_000);
+    child.stdout?.on("data", (d) => (stdout += d));
+    child.stderr?.on("data", (d) => (stderr += d));
+    child.on("error", (e) => finish({ stdout, stderr, status: null, spawnError: { message: e.message } }));
+    child.on("close", (code) => finish({ stdout, stderr, status: code }));
   });
-  return interpretResult(
-    {
-      stdout: res.stdout ?? "",
-      stderr: res.stderr ?? "",
-      status: res.status,
-      spawnError: res.error ? { message: res.error.message } : undefined,
-    },
-    { json: opts.json },
-  );
+}
+
+async function runOnce(args: string[], opts: RunOpts = {}): Promise<unknown> {
+  const finalArgs = opts.json === false ? args : withJson(args);
+  const raw = await spawnCollect(finalArgs, opts);
+  return interpretResult(raw, { json: opts.json });
 }
 
 /** Run with category-aware exponential backoff for retryable errors. */
@@ -231,7 +243,7 @@ async function run(args: string[], opts: RunOpts = {}): Promise<unknown> {
   // eslint-disable-next-line no-constant-condition
   while (true) {
     try {
-      return runOnce(args, opts);
+      return await runOnce(args, opts);
     } catch (err) {
       if (!(err instanceof KrakenError) || !err.retryable) throw err;
       const cap = MAX_RETRIES[err.category] ?? 3;
