@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-30T18:54:23.316Z",
+  "generatedAt": "2026-05-31T16:39:12.488Z",
   "krakenBin": "/Users/oluwademilade/.cargo/bin/kraken",
   "findings": [
     {
@@ -11,8 +11,8 @@
     {
       "id": "network",
       "question": "Is *.kraken.com reachable from this environment?",
-      "status": "DEFERRED",
-      "detail": "NO — Kraken egress is blocked here (allowlist). Build + paper-state + unit tests work offline; LIVE prices require running on the user's terminal/VPS. Use ARENA_PRICE_FEED=replay for offline dev."
+      "status": "CONFIRMED",
+      "detail": "YES — live market data reachable."
     },
     {
       "id": "isolation-home",
@@ -25,8 +25,8 @@
         "foundStatePaths": [
           "Library/Application Support/kraken/paper/state.json"
         ],
-        "baseA": "/tmp/claude-501/kraken-verify-A-a2cwWe",
-        "baseB": "/tmp/claude-501/kraken-verify-B-axcFYU"
+        "baseA": "/tmp/claude-501/kraken-verify-A-SYKUfL",
+        "baseB": "/tmp/claude-501/kraken-verify-B-3UgBYW"
       }
     },
     {
@@ -61,13 +61,13 @@
     {
       "id": "symbol-format",
       "question": "Which symbol format does `ticker` accept (BTCUSD vs BTC/USD vs XBT)?",
-      "status": "DEFERRED",
-      "detail": "DEFERRED — *.kraken.com egress is blocked in this environment; re-run on a network-enabled host (user's terminal / VPS).",
+      "status": "CONFIRMED",
+      "detail": "Accepted: BTCUSD, BTC/USD, XBTUSD.",
       "evidence": {
-        "BTCUSD": "network-blocked",
-        "BTC/USD": "network-blocked",
-        "XBTUSD": "network-blocked",
-        "XBT/USD": "network-blocked"
+        "BTCUSD": "OK",
+        "BTC/USD": "OK",
+        "XBTUSD": "OK",
+        "XBT/USD": "rejected (exit 1)"
       }
     },
     {
