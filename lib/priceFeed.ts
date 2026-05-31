@@ -1,36 +1,47 @@
 /**
- * lib/priceFeed.ts — price source abstraction.
+ * lib/priceFeed.ts — price source abstraction (spot + futures).
  *
- * `LiveKrakenPriceFeed` uses the real CLI (`ticker`/`ohlc`) and is the default on a
- * network-enabled host. `ReplayPriceFeed` is a deterministic, mean-reverting offline
- * market so the arena (and its demo) runs even where *.kraken.com is blocked — and
- * doubles as reproducible backup footage (BUILD.md §17).
+ * `LiveKrakenPriceFeed` uses the real CLI (`ticker`/`ohlc` for spot, `futures ticker`
+ * for perps) — the default on a network-enabled host. `ReplayPriceFeed` is a
+ * deterministic offline market (incl. synthesized funding rates) so the arena and its
+ * demo run even where *.kraken.com is blocked, and as reproducible backup footage.
  */
-import { ohlc, ticker } from "./kraken.js";
-import type { Candle } from "./types.js";
+import { futuresTicker, ohlc, ticker } from "./kraken.js";
+import type { Candle, FuturesTickerData } from "./types.js";
+
+export function isFuturesSymbol(symbol: string): boolean {
+  return /^(PF_|PI_|FI_)/.test(symbol);
+}
 
 export interface PriceFeed {
   readonly kind: "live" | "replay";
   getCandles(symbol: string, intervalMinutes: number, count: number): Promise<Candle[]>;
   getPrice(symbol: string): Promise<number>;
+  getFuturesTicker(symbol: string): Promise<FuturesTickerData>;
 }
 
 // ─── Live ────────────────────────────────────────────────────────────────────
 export class LiveKrakenPriceFeed implements PriceFeed {
   readonly kind = "live" as const;
+
   async getCandles(symbol: string, intervalMinutes: number, count: number): Promise<Candle[]> {
+    if (isFuturesSymbol(symbol)) return []; // futures have no REST OHLC; agents use change24h
     const all = await ohlc(symbol, intervalMinutes);
     return all.slice(-count);
   }
+
   async getPrice(symbol: string): Promise<number> {
-    const q = await ticker(symbol);
-    return q.last;
+    if (isFuturesSymbol(symbol)) return (await futuresTicker(symbol)).last;
+    return (await ticker(symbol)).last;
+  }
+
+  async getFuturesTicker(symbol: string): Promise<FuturesTickerData> {
+    return futuresTicker(symbol);
   }
 }
 
 // ─── Deterministic offline market (Ornstein–Uhlenbeck on log-price) ──────────
 function hash01(s: string): number {
-  // FNV-1a → [0,1)
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) {
     h ^= s.charCodeAt(i);
@@ -44,18 +55,19 @@ const BASE_PRICE: Record<string, number> = {
   XBTUSD: 68000,
   ETHUSD: 3500,
   SOLUSD: 160,
+  PF_XBTUSD: 73000,
+  PF_ETHUSD: 2000,
+  PF_SPXUSD: 0.32,
+  PF_QQQXUSD: 0.5,
 };
 
-// Anchor so series are continuous within and across runs (deterministic by clock).
 const ORIGIN_MS = Date.UTC(2026, 0, 1);
 
 export class ReplayPriceFeed implements PriceFeed {
   readonly kind = "replay" as const;
   private sigma: number;
-  private theta: number; // mean-reversion strength
+  private theta: number;
   constructor(opts?: { sigma?: number; theta?: number }) {
-    // Lower theta ⇒ trends persist longer (more catchable momentum) in this
-    // synthetic demo market. Still mean-reverting so it never runs away.
     this.sigma = opts?.sigma ?? 0.012;
     this.theta = opts?.theta ?? 0.02;
   }
@@ -64,11 +76,9 @@ export class ReplayPriceFeed implements PriceFeed {
     return BASE_PRICE[symbol] ?? 100;
   }
 
-  /** Log-deviation from base at integer step, via a seeded OU walk from ORIGIN. */
   private logDevAtStep(symbol: string, step: number): number {
     let x = 0;
-    const originStep = 0;
-    for (let k = originStep + 1; k <= step; k++) {
+    for (let k = 1; k <= step; k++) {
       const shock = (hash01(`${symbol}:${k}`) - 0.5) * 2 * this.sigma;
       x = x * (1 - this.theta) + shock;
     }
@@ -81,8 +91,7 @@ export class ReplayPriceFeed implements PriceFeed {
     const frac = stepF - step;
     const a = this.logDevAtStep(symbol, step);
     const b = this.logDevAtStep(symbol, step + 1);
-    const dev = a + (b - a) * frac; // linear interp for intra-step liveliness
-    return this.base(symbol) * Math.exp(dev);
+    return this.base(symbol) * Math.exp(a + (b - a) * frac);
   }
 
   async getCandles(symbol: string, intervalMinutes: number, count: number): Promise<Candle[]> {
@@ -112,6 +121,24 @@ export class ReplayPriceFeed implements PriceFeed {
 
   async getPrice(symbol: string): Promise<number> {
     return this.priceAt(symbol, Date.now(), 60_000);
+  }
+
+  async getFuturesTicker(symbol: string): Promise<FuturesTickerData> {
+    const last = this.priceAt(symbol, Date.now(), 60_000);
+    const dayAgo = this.priceAt(symbol, Date.now() - 86_400_000, 60_000);
+    const change24h = dayAgo !== 0 ? ((last - dayAgo) / dayAgo) * 100 : 0;
+    // Funding oscillates +/- so the carry agent flips sides over time (deterministic).
+    const phase = (Date.now() / 3.6e6 + hash01(symbol) * 10) % (2 * Math.PI);
+    const fundingRate = 0.0004 * Math.sin(phase);
+    return {
+      symbol,
+      last,
+      markPrice: last,
+      indexPrice: last,
+      fundingRate,
+      fundingRatePrediction: 0.0004 * Math.sin(phase + 0.3),
+      change24h,
+    };
   }
 }
 

@@ -1,53 +1,40 @@
 /**
- * worker/agentRunner.ts — the shared agent tick loop (BUILD.md §5.2).
+ * worker/agentRunner.ts — the shared agent tick loop (BUILD.md §5.2), strategy-agnostic.
  *
- *   marketData → features → portfolio → claudeDecide → pre-trade check
+ *   marketData → features → portfolio → decide → pre-trade check
  *   → isolated execute → equity snapshot → SQLite + hash-chained audit log
  *
- * Phase 1 ships a MINIMAL pre-trade check (size clamp only). The full deterministic
- * Risk Marshal (drawdown/exposure veto + benching + dead-man's switch) lands in Phase 3.
+ * Each agent's `gather()` does all strategy-specific work (compute features, pick a
+ * candidate symbol, build the LLM context, and a deterministic fallback closure that
+ * captures those features). `runTick` stays generic: it sizes/executes from a price
+ * map and writes the snapshot. Phase 1 ships a MINIMAL pre-trade check (size clamp);
+ * the full deterministic Risk Marshal lands in Phase 3.
  */
 import type { DatabaseSync } from "node:sqlite";
 import { appendAudit } from "../lib/audit.js";
-import {
-  getPeakEquity,
-  insertDecision,
-  insertEquitySnapshot,
-  insertTrade,
-} from "../lib/db.js";
+import { getPeakEquity, insertDecision, insertEquitySnapshot, insertTrade } from "../lib/db.js";
 import type { IsolationProvider, PortfolioStatus } from "../lib/isolation.js";
 import type { PriceFeed } from "../lib/priceFeed.js";
-import type {
-  AgentConfig,
-  MomentumFeatures,
-  Proposal,
-  Verdict,
-} from "../lib/types.js";
+import type { AgentConfig, Proposal, Verdict } from "../lib/types.js";
 
-/** Context an agent assembles each tick from deterministic features. */
+/** What an agent assembles each tick. `fallback` captures the strategy features. */
 export interface TickContext {
-  /** Features keyed by symbol (the LLM/fallback reason over these). */
-  featuresBySymbol: Record<string, MomentumFeatures>;
-  /** The candidate symbol the agent is most interested in this tick. */
+  /** Current price per candidate symbol — used generically for sizing + execution. */
+  priceBySymbol: Record<string, number>;
+  /** The symbol the agent is most interested in this tick. */
   primarySymbol: string;
-  /** Compact object serialized into the LLM user turn. */
+  /** Compact object serialized into the LLM user turn (strategy-specific features). */
   llmContext: Record<string, unknown>;
-}
-
-export interface FallbackInput {
-  featuresBySymbol: Record<string, MomentumFeatures>;
-  status: PortfolioStatus;
-  maxSize: number;
-  primarySymbol: string;
+  /** Serialized features for the decisions.features_json column. */
+  featuresJson: string;
+  /** Deterministic decision (no API key / on LLM error), given the resolved limits. */
+  fallback: (maxSize: number, status: PortfolioStatus) => Proposal;
 }
 
 export interface AgentDefinition {
   config: AgentConfig;
   systemPrompt: string;
-  /** Gather deterministic features + pick a candidate symbol. */
   gather(feed: PriceFeed, intervalMinutes: number, candleCount: number): Promise<TickContext>;
-  /** Deterministic decision (used when no API key / on LLM error). */
-  fallback(input: FallbackInput): Proposal;
 }
 
 export interface RunDeps {
@@ -84,7 +71,7 @@ export async function runTick(def: AgentDefinition, deps: RunDeps): Promise<Tick
   const ctx = await def.gather(feed, intervalMinutes, candleCount);
   const status = await isolation.status(config);
 
-  const primaryPrice = ctx.featuresBySymbol[ctx.primarySymbol]?.price ?? NaN;
+  const primaryPrice = ctx.priceBySymbol[ctx.primarySymbol] ?? NaN;
   const maxSize =
     Number.isFinite(primaryPrice) && primaryPrice > 0
       ? (config.maxPositionPct * status.equity) / primaryPrice
@@ -95,24 +82,24 @@ export async function runTick(def: AgentDefinition, deps: RunDeps): Promise<Tick
     systemPrompt: def.systemPrompt,
     context: { ...ctx.llmContext, portfolio: status },
     maxSize,
-    fallback: () => def.fallback({ featuresBySymbol: ctx.featuresBySymbol, status, maxSize, primarySymbol: ctx.primarySymbol }),
+    fallback: () => ctx.fallback(maxSize, status),
   });
 
-  // ── Phase 1 pre-trade check: size clamp only (full Risk Marshal = Phase 3) ──
+  // ── Phase 1/2 pre-trade check: size clamp only (full Risk Marshal = Phase 3) ──
   const clampedSize = Math.min(proposal.size, maxSize);
   const verdict: Verdict = {
     approved: proposal.action !== "hold" && clampedSize > 0,
-    reason: proposal.action === "hold" ? "agent chose to hold" : clampedSize > 0 ? "pre-trade size clamp ok" : "size clamped to zero",
+    reason:
+      proposal.action === "hold" ? "agent chose to hold" : clampedSize > 0 ? "pre-trade size clamp ok" : "size clamped to zero",
     clampedSize,
   };
 
-  const featuresJson = JSON.stringify(ctx.featuresBySymbol);
-  const decisionId = insertDecision(db, config.id, ts, featuresJson, proposal, verdict);
-  appendAudit(db, "decision", { agentId: config.id, ts, features: ctx.featuresBySymbol, proposal, verdict }, ts);
+  const decisionId = insertDecision(db, config.id, ts, ctx.featuresJson, proposal, verdict);
+  appendAudit(db, "decision", { agentId: config.id, ts, features: safeJson(ctx.featuresJson), proposal, verdict }, ts);
 
   let filled = false;
   if (verdict.approved) {
-    const execPrice = ctx.featuresBySymbol[proposal.symbol]?.price ?? primaryPrice;
+    const execPrice = ctx.priceBySymbol[proposal.symbol] ?? primaryPrice;
     const fill = await isolation.execute(config, { ...proposal, size: clampedSize }, execPrice);
     if (fill) {
       filled = true;
@@ -135,30 +122,56 @@ export async function runTick(def: AgentDefinition, deps: RunDeps): Promise<Tick
   }
 
   // ── Equity snapshot ──
-  const post = await isolation.status(config);
-  const peak = Math.max(getPeakEquity(db, config.id, post.startingBalance), post.equity);
-  const pnlPct = post.startingBalance > 0 ? (post.equity / post.startingBalance - 1) * 100 : 0;
-  const drawdownPct = peak > 0 ? (post.equity / peak - 1) * 100 : 0;
-  const snapTs = Date.now();
-  insertEquitySnapshot(db, {
-    agentId: config.id,
-    ts: snapTs,
-    equity: post.equity,
-    pnlPct,
-    peakEquity: peak,
-    drawdownPct,
-    positions: post.positions,
-  });
-  appendAudit(db, "equity", { agentId: config.id, ts: snapTs, equity: post.equity, pnlPct, drawdownPct }, snapTs);
+  const snap = await recordSnapshot(db, isolation, config);
 
   return {
     agentId: config.id,
     action: proposal.action,
     symbol: proposal.symbol,
     size: clampedSize,
-    equity: post.equity,
-    pnlPct,
-    drawdownPct,
+    equity: snap.equity,
+    pnlPct: snap.pnlPct,
+    drawdownPct: snap.drawdownPct,
     filled,
   };
+}
+
+/**
+ * Fast equity snapshot (NO LLM): mark-to-market + drawdown, written to the DB + audit.
+ * Runs on a frequent cadence so the leaderboard stays live even while slow LLM
+ * decisions are in flight. Returns the computed snapshot.
+ */
+export async function recordSnapshot(
+  db: DatabaseSync,
+  isolation: IsolationProvider,
+  config: AgentConfig,
+): Promise<{ equity: number; pnlPct: number; drawdownPct: number }> {
+  const post = await isolation.status(config);
+  const peak = Math.max(getPeakEquity(db, config.id, post.startingBalance), post.equity);
+  const pnlPct = post.startingBalance > 0 ? (post.equity / post.startingBalance - 1) * 100 : 0;
+  const drawdownPct = peak > 0 ? (post.equity / peak - 1) * 100 : 0;
+  const ts = Date.now();
+  insertEquitySnapshot(db, {
+    agentId: config.id,
+    ts,
+    equity: post.equity,
+    pnlPct,
+    peakEquity: peak,
+    drawdownPct,
+    positions: post.positions,
+  });
+  appendAudit(db, "equity", { agentId: config.id, ts, equity: post.equity, pnlPct, drawdownPct }, ts);
+  return { equity: post.equity, pnlPct, drawdownPct };
+}
+
+export async function snapshotAgent(config: AgentConfig, deps: Pick<RunDeps, "db" | "isolation">): Promise<void> {
+  await recordSnapshot(deps.db, deps.isolation, config);
+}
+
+function safeJson(s: string): unknown {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return s;
+  }
 }

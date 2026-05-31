@@ -54,15 +54,34 @@ export type StrategyId =
 
 export type AgentStatus = "ACTIVE" | "BENCHED" | "LIVE";
 
+export type Venue = "spot" | "futures";
+
 export interface AgentConfig {
   id: string;
   name: string;
   strategy: StrategyId;
+  venue: Venue; // spot → `kraken paper`; futures → `kraken futures paper`
   allowedSymbols: string[];
   maxPositionPct: number; // hard cap: max % of equity in a single position
   maxLeverage: number;
   startingBalance: number;
   startingCurrency: string; // e.g. "USD"
+}
+
+// ─── Futures market data (verified shapes from `kraken futures ticker`) ───────
+export interface FuturesTickerData {
+  symbol: string;
+  last: number;
+  markPrice: number;
+  indexPrice: number;
+  fundingRate: number; // current funding (sign: >0 ⇒ longs pay shorts)
+  fundingRatePrediction: number;
+  change24h: number; // 24h % change (coarse trend)
+}
+
+export interface FundingPoint {
+  ts: number;
+  fundingRate: number;
 }
 
 // ─── Decisions / trades ──────────────────────────────────────────────────────
@@ -141,6 +160,21 @@ export interface PaperStatus {
   mode: string;
   valuation_complete?: boolean;
   positions?: unknown;
+}
+
+/** Mirror of `kraken futures paper status -o json` (observed fields). */
+export interface FuturesPaperStatus {
+  equity: number;
+  collateral: number;
+  starting_collateral: number;
+  total_fills: number;
+  unrealized_pnl: number;
+  pnl: number;
+  pnl_pct: number;
+  positions: number;
+  open_orders: number;
+  currency: string;
+  mode: string;
 }
 
 export interface EquitySnapshot {

@@ -21,6 +21,9 @@ import {
   type AgentEnv,
   type Candle,
   type ErrorCategory,
+  type FundingPoint,
+  type FuturesPaperStatus,
+  type FuturesTickerData,
   type KrakenErrorEnvelope,
   type PaperStatus,
   type TickerQuote,
@@ -375,6 +378,113 @@ export async function paperSell(
 
 export async function paperStatus(env: AgentEnv): Promise<PaperStatus> {
   return (await run(["paper", "status"], { env })) as PaperStatus;
+}
+
+/** Open spot paper positions, normalized to symbol→base-units (best-effort). */
+export async function paperBalance(env: AgentEnv): Promise<Record<string, number>> {
+  const raw = await run(["paper", "balance"], { env });
+  const out: Record<string, number> = {};
+  // Shape unverified across versions; accept {balances:{ASSET:qty}} or {ASSET:qty} or [{asset,amount}].
+  const obj = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const src = (obj.balances ?? obj.assets ?? obj) as Record<string, unknown> | unknown[];
+  if (Array.isArray(src)) {
+    for (const r of src) {
+      if (r && typeof r === "object") {
+        const o = r as Record<string, unknown>;
+        const sym = String(o.asset ?? o.symbol ?? o.currency ?? "");
+        const qty = Number(o.amount ?? o.balance ?? o.volume ?? 0);
+        if (sym && Number.isFinite(qty)) out[sym] = qty;
+      }
+    }
+  } else if (src && typeof src === "object") {
+    for (const [k, v] of Object.entries(src)) {
+      const qty = Number(v);
+      if (Number.isFinite(qty)) out[k] = qty;
+    }
+  }
+  return out;
+}
+
+// ─── Futures market data (no auth) ───────────────────────────────────────────
+export async function futuresTicker(symbol: string): Promise<FuturesTickerData> {
+  const raw = (await run(["futures", "ticker", symbol])) as Record<string, unknown>;
+  const t = (raw?.ticker ?? raw) as Record<string, unknown>;
+  return {
+    symbol: String(t.symbol ?? symbol),
+    last: Number(t.last ?? t.markPrice ?? NaN),
+    markPrice: Number(t.markPrice ?? t.last ?? NaN),
+    indexPrice: Number(t.indexPrice ?? t.markPrice ?? NaN),
+    fundingRate: Number(t.fundingRate ?? 0),
+    fundingRatePrediction: Number(t.fundingRatePrediction ?? 0),
+    change24h: Number(t.change24h ?? 0),
+  };
+}
+
+export async function futuresTickers(): Promise<unknown> {
+  return run(["futures", "tickers"]);
+}
+
+export async function futuresInstruments(): Promise<unknown> {
+  return run(["futures", "instruments"]);
+}
+
+/** Historical funding-rate series, normalized oldest→newest. */
+export async function futuresHistoricalFundingRates(symbol: string): Promise<FundingPoint[]> {
+  const raw = await run(["futures", "historical-funding-rates", symbol]);
+  let rows: unknown[] = [];
+  if (Array.isArray(raw)) rows = raw;
+  else if (raw && typeof raw === "object") {
+    const o = raw as Record<string, unknown>;
+    const arr = (Array.isArray(o.rates) && o.rates) || Object.values(o).find((v) => Array.isArray(v));
+    if (Array.isArray(arr)) rows = arr;
+  }
+  return rows
+    .map((r): FundingPoint | null => {
+      if (!r || typeof r !== "object") return null;
+      const o = r as Record<string, unknown>;
+      const fr = Number(o.fundingRate ?? o.relativeFundingRate ?? NaN);
+      const ts = typeof o.timestamp === "string" ? Date.parse(o.timestamp) : Number(o.timestamp ?? 0);
+      return Number.isFinite(fr) ? { ts, fundingRate: fr } : null;
+    })
+    .filter((p): p is FundingPoint => p !== null);
+}
+
+// ─── Futures paper trading (no auth) ─────────────────────────────────────────
+export async function futuresPaperInit(
+  env: AgentEnv,
+  balance: number,
+  currency = "USD",
+): Promise<unknown> {
+  return run(["futures", "paper", "init", "--balance", String(balance), "--currency", currency], { env });
+}
+
+interface FuturesOrderOpts {
+  leverage: number; // REQUIRED by the CLI (validation error otherwise)
+  type?: "market" | "limit";
+  price?: number;
+}
+
+function futuresOrderArgs(side: "buy" | "sell", symbol: string, size: number, opts: FuturesOrderOpts): string[] {
+  const args = ["futures", "paper", side, symbol, String(size), "--leverage", String(opts.leverage)];
+  args.push("--type", opts.type ?? "market");
+  if (opts.price != null) args.push("--price", String(opts.price));
+  return args;
+}
+
+export async function futuresPaperBuy(env: AgentEnv, symbol: string, size: number, opts: FuturesOrderOpts): Promise<unknown> {
+  return run(futuresOrderArgs("buy", symbol, size, opts), { env });
+}
+
+export async function futuresPaperSell(env: AgentEnv, symbol: string, size: number, opts: FuturesOrderOpts): Promise<unknown> {
+  return run(futuresOrderArgs("sell", symbol, size, opts), { env });
+}
+
+export async function futuresPaperStatus(env: AgentEnv): Promise<FuturesPaperStatus> {
+  return (await run(["futures", "paper", "status"], { env })) as FuturesPaperStatus;
+}
+
+export async function futuresPaperPositions(env: AgentEnv): Promise<unknown> {
+  return run(["futures", "paper", "positions"], { env });
 }
 
 // ─── LIVE order surface — FINALE ONLY, never called in the paper tournament ───

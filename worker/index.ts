@@ -12,7 +12,7 @@ import { appendAudit } from "../lib/audit.js";
 import { getDb, setAgentStatus, upsertAgent } from "../lib/db.js";
 import { createIsolation } from "../lib/isolation.js";
 import { createPriceFeed } from "../lib/priceFeed.js";
-import { runTick, type AgentDefinition, type RunDeps } from "./agentRunner.js";
+import { runTick, snapshotAgent, type AgentDefinition, type RunDeps } from "./agentRunner.js";
 import { claudeDecide } from "./decide.js";
 import { momentumAgent } from "./agents/momentum.js";
 
@@ -26,7 +26,8 @@ for (const f of [".env", ".env.local"]) {
   }
 }
 
-const TICK_SECONDS = Number(process.env.ARENA_TICK_SECONDS ?? 20);
+const TICK_SECONDS = Number(process.env.ARENA_TICK_SECONDS ?? 20); // LLM decision cadence
+const SNAPSHOT_SECONDS = Number(process.env.ARENA_SNAPSHOT_SECONDS ?? 5); // fast equity cadence
 const OHLC_INTERVAL_MIN = Number(process.env.ARENA_OHLC_INTERVAL ?? 60);
 const CANDLE_COUNT = Number(process.env.ARENA_CANDLE_COUNT ?? 50);
 const DATA_DIR = process.env.ARENA_DATA_DIR ?? "./data";
@@ -80,29 +81,49 @@ async function main() {
 
   const timers: NodeJS.Timeout[] = [];
   let running = true;
+  const inFlight = new Set<string>(); // agents with a decision currently running
 
-  async function tickAgent(def: AgentDefinition) {
-    if (!running) return;
+  // Slow loop: full LLM decision + execute. Guarded so a slow model (MiMo ~25s)
+  // never overlaps itself for the same agent.
+  async function decisionTick(def: AgentDefinition) {
+    if (!running || inFlight.has(def.config.id)) return;
+    inFlight.add(def.config.id);
     try {
       const r = await runTick(def, deps);
       log(
         `${def.config.name}: ${r.action}${r.filled ? " (filled)" : ""} ${r.size > 0 ? r.size.toFixed(6) + " " + r.symbol : ""} | equity $${r.equity.toFixed(2)} (${r.pnlPct >= 0 ? "+" : ""}${r.pnlPct.toFixed(2)}%) dd ${r.drawdownPct.toFixed(2)}%`,
       );
     } catch (err) {
-      log(`${def.config.name}: tick error — ${(err as Error).message}`);
+      log(`${def.config.name}: decision error — ${(err as Error).message}`);
+    } finally {
+      inFlight.delete(def.config.id);
     }
   }
 
-  // Stagger agents across the tick window to respect rate limits.
+  // Fast loop: mark-to-market equity snapshots for every agent (NO LLM) so the
+  // leaderboard stays live while decisions are in flight.
+  async function snapshotTick() {
+    if (!running) return;
+    for (const def of AGENTS) {
+      try {
+        await snapshotAgent(def.config, deps);
+      } catch {
+        /* transient (e.g. rate limit) — next tick recovers */
+      }
+    }
+  }
+  timers.push(setInterval(() => void snapshotTick(), SNAPSHOT_SECONDS * 1000));
+
+  // Stagger agents' decision loops across the tick window to respect rate limits.
   AGENTS.forEach((def, i) => {
     const stagger = AGENTS.length > 1 ? (i * (TICK_SECONDS * 1000)) / AGENTS.length : 0;
     setTimeout(() => {
-      void tickAgent(def); // fire first tick promptly
-      timers.push(setInterval(() => void tickAgent(def), TICK_SECONDS * 1000));
+      void decisionTick(def);
+      timers.push(setInterval(() => void decisionTick(def), TICK_SECONDS * 1000));
     }, stagger);
   });
 
-  log(`arena online — ${AGENTS.length} agent(s), tick every ${TICK_SECONDS}s`);
+  log(`arena online — ${AGENTS.length} agent(s); decide every ${TICK_SECONDS}s, snapshot every ${SNAPSHOT_SECONDS}s`);
 
   const shutdown = (sig: string) => {
     log(`received ${sig}, shutting down`);

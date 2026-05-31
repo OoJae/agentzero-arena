@@ -91,6 +91,7 @@ async function main() {
     id: "probe",
     name: "Probe",
     strategy: "momentum",
+    venue: "spot",
     allowedSymbols: ["BTCUSD", "ETHUSD", "SOLUSD"],
     maxPositionPct: 0.5,
     maxLeverage: 1,
