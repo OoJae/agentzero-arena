@@ -6,7 +6,7 @@
  * reasons over THESE numbers — never over imagined future prices. Pure functions,
  * fully unit-tested.
  */
-import type { Candle, MomentumFeatures } from "./types.js";
+import type { Candle, MeanReversionFeatures, MomentumFeatures } from "./types.js";
 
 export function mean(xs: number[]): number {
   if (xs.length === 0) return 0;
@@ -100,4 +100,54 @@ export function computeMomentumFeatures(
     drawdownFromHigh,
     realizedVol,
   };
+}
+
+// ─── Mean-Reversion features ──────────────────────────────────────────────────
+/** Relative Strength Index over `period` (Wilder-style simple average). */
+export function rsi(closes: number[], period = 14): number {
+  if (closes.length < period + 1) return 50;
+  let gains = 0;
+  let losses = 0;
+  for (let i = closes.length - period; i < closes.length; i++) {
+    const change = closes[i]! - closes[i - 1]!;
+    if (change >= 0) gains += change;
+    else losses -= change;
+  }
+  const avgGain = gains / period;
+  const avgLoss = losses / period;
+  if (avgLoss === 0) return avgGain === 0 ? 50 : 100;
+  const rs = avgGain / avgLoss;
+  return 100 - 100 / (1 + rs);
+}
+
+export interface MeanReversionParams {
+  window: number; // SMA / stdev lookback
+  bandK: number; // Bollinger band width (stdevs)
+  rsiPeriod: number;
+}
+
+export const DEFAULT_MEAN_REVERSION_PARAMS: MeanReversionParams = {
+  window: 20,
+  bandK: 2,
+  rsiPeriod: 14,
+};
+
+/** Mean-reversion features: z-score vs SMA, Bollinger %B, RSI. */
+export function computeMeanReversionFeatures(
+  symbol: string,
+  candles: Candle[],
+  params: MeanReversionParams = DEFAULT_MEAN_REVERSION_PARAMS,
+): MeanReversionFeatures {
+  const closes = candles.map((c) => c.close).filter((c) => Number.isFinite(c));
+  const price = closes.length ? closes[closes.length - 1]! : NaN;
+  const window = Math.min(params.window, closes.length);
+  const slice = closes.slice(-window);
+  const sma = mean(slice);
+  const sd = stdev(slice);
+  const zScore = sd > 0 ? (price - sma) / sd : 0;
+  const upper = sma + params.bandK * sd;
+  const lower = sma - params.bandK * sd;
+  const percentB = upper > lower ? (price - lower) / (upper - lower) : 0.5;
+  const smaDeviation = sma !== 0 ? (price - sma) / sma : 0;
+  return { symbol, price, zScore, percentB, rsi: rsi(closes, params.rsiPeriod), smaDeviation };
 }

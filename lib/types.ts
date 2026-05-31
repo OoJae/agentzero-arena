@@ -145,6 +145,32 @@ export interface MomentumFeatures {
   realizedVol: number; // stdev of recent returns
 }
 
+export interface MeanReversionFeatures {
+  symbol: string;
+  price: number;
+  zScore: number; // (price − SMA) / stdev  (negative ⇒ oversold)
+  percentB: number; // Bollinger position: 0 = lower band, 1 = upper band
+  rsi: number; // 0..100 oscillator
+  smaDeviation: number; // (price − SMA) / SMA
+}
+
+export interface FundingFeatures {
+  symbol: string;
+  price: number;
+  fundingRate: number; // current funding (>0 ⇒ longs pay shorts ⇒ short receives)
+  fundingPrediction: number;
+  fundingTrend: number; // avg of recent historical funding
+  change24h: number;
+}
+
+export interface MacroFeatures {
+  symbol: string;
+  price: number;
+  indexChange24h: number; // equity-index 24h trend
+  cryptoChange24h: number; // BTC perp 24h trend (cross-asset reference)
+  divergence: number; // crypto − index (cross-asset divergence)
+}
+
 // ─── Portfolio / equity ──────────────────────────────────────────────────────
 /** Mirror of `kraken paper status -o json` (observed fields). */
 export interface PaperStatus {

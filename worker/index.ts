@@ -15,6 +15,7 @@ import { createPriceFeed } from "../lib/priceFeed.js";
 import { runTick, snapshotAgent, type AgentDefinition, type RunDeps } from "./agentRunner.js";
 import { claudeDecide } from "./decide.js";
 import { momentumAgent } from "./agents/momentum.js";
+import { meanReversionAgent } from "./agents/meanReversion.js";
 
 // Load .env then .env.local (local overrides). Paper mode needs no secrets, so a
 // missing file is fine. Node 22+ builtin; no dotenv dependency.
@@ -32,8 +33,8 @@ const OHLC_INTERVAL_MIN = Number(process.env.ARENA_OHLC_INTERVAL ?? 60);
 const CANDLE_COUNT = Number(process.env.ARENA_CANDLE_COUNT ?? 50);
 const DATA_DIR = process.env.ARENA_DATA_DIR ?? "./data";
 
-// Phase 1: Momentum only. Phase 2 appends meanReversion, fundingCarry, macroHedge.
-const AGENTS: AgentDefinition[] = [momentumAgent];
+// Phase 2 roster (Funding-Carry + Macro-Hedge land next slice).
+const AGENTS: AgentDefinition[] = [momentumAgent, meanReversionAgent];
 
 function log(msg: string, extra?: Record<string, unknown>) {
   console.log(`[worker ${new Date().toISOString()}] ${msg}`, extra ? JSON.stringify(extra) : "");

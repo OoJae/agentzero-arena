@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  computeMeanReversionFeatures,
   computeMomentumFeatures,
   lookbackReturn,
   mean,
   periodReturns,
+  rsi,
   stdev,
 } from "./features.js";
 import type { Candle } from "./types.js";
@@ -73,5 +75,42 @@ describe("computeMomentumFeatures", () => {
     expect(() => computeMomentumFeatures("BTCUSD", [])).not.toThrow();
     const f = computeMomentumFeatures("BTCUSD", [candle(100)]);
     expect(Number.isFinite(f.price)).toBe(true);
+  });
+});
+
+describe("rsi", () => {
+  it("is high for a steady uptrend and low for a steady downtrend", () => {
+    const up = Array.from({ length: 20 }, (_, i) => 100 + i);
+    const down = Array.from({ length: 20 }, (_, i) => 100 - i);
+    expect(rsi(up, 14)).toBeGreaterThan(95);
+    expect(rsi(down, 14)).toBeLessThan(5);
+  });
+  it("returns 50 for too-short input", () => {
+    expect(rsi([100, 101], 14)).toBe(50);
+  });
+});
+
+describe("computeMeanReversionFeatures", () => {
+  function candle(close: number): Candle {
+    return { time: 0, open: close, high: close, low: close, close, volume: 1 };
+  }
+  it("flags oversold when price dips well below the moving average", () => {
+    const closes = [...Array.from({ length: 24 }, () => 100), 90]; // flat then sharp dip
+    const f = computeMeanReversionFeatures("BTCUSD", closes.map(candle));
+    expect(f.zScore).toBeLessThan(-1);
+    expect(f.percentB).toBeLessThan(0.5);
+    expect(f.smaDeviation).toBeLessThan(0);
+    expect(f.rsi).toBeLessThan(50);
+  });
+  it("flags overbought when price spikes above the moving average", () => {
+    const closes = [...Array.from({ length: 24 }, () => 100), 112];
+    const f = computeMeanReversionFeatures("ETHUSD", closes.map(candle));
+    expect(f.zScore).toBeGreaterThan(1);
+    expect(f.percentB).toBeGreaterThan(0.5);
+  });
+  it("is near-neutral on a flat series", () => {
+    const f = computeMeanReversionFeatures("SOLUSD", Array.from({ length: 25 }, () => candle(100)));
+    expect(Math.abs(f.zScore)).toBeLessThan(0.5);
+    expect(f.rsi).toBe(50);
   });
 });
