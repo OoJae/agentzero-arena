@@ -16,10 +16,14 @@ import { runTick, type AgentDefinition, type RunDeps } from "./agentRunner.js";
 import { claudeDecide } from "./decide.js";
 import { momentumAgent } from "./agents/momentum.js";
 
-try {
-  process.loadEnvFile(".env");
-} catch {
-  /* no .env — paper mode needs no secrets */
+// Load .env then .env.local (local overrides). Paper mode needs no secrets, so a
+// missing file is fine. Node 22+ builtin; no dotenv dependency.
+for (const f of [".env", ".env.local"]) {
+  try {
+    process.loadEnvFile(f);
+  } catch {
+    /* file absent — ignore */
+  }
 }
 
 const TICK_SECONDS = Number(process.env.ARENA_TICK_SECONDS ?? 20);

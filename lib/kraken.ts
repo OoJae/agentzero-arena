@@ -103,8 +103,18 @@ export function mapCategory(envelope: KrakenErrorEnvelope | null, combined: stri
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 // ─── Core runner (one-shot, JSON) ────────────────────────────────────────────
-function buildEnv(env?: AgentEnv): NodeJS.ProcessEnv {
+/**
+ * Build the subprocess env. SAFETY: Kraken credentials are STRIPPED for every call
+ * except an explicit finale (`finale: true`). The whole paper tournament therefore
+ * runs credential-free by construction — even though live keys may sit in `.env` —
+ * so a stray `order` command cannot authenticate.
+ */
+function buildEnv(env?: AgentEnv, finale = false): NodeJS.ProcessEnv {
   const base = { ...process.env };
+  if (!finale) {
+    delete base.KRAKEN_API_KEY;
+    delete base.KRAKEN_API_SECRET;
+  }
   if (env?.home) base.HOME = env.home;
   if (env?.extra) Object.assign(base, env.extra);
   return base;
@@ -121,6 +131,8 @@ interface RunOpts {
   timeoutMs?: number;
   /** If false, do not append `-o json` (e.g. for cancel-after which returns plain). */
   json?: boolean;
+  /** Finale ONLY: keep Kraken credentials in the subprocess env (auth'd live calls). */
+  finale?: boolean;
 }
 
 export interface RawResult {
@@ -194,7 +206,7 @@ export function interpretResult(res: RawResult, opts: { json?: boolean } = {}): 
 function runOnce(args: string[], opts: RunOpts = {}): unknown {
   const finalArgs = opts.json === false ? args : withJson(args);
   const res = spawnSync(KRAKEN_BIN, finalArgs, {
-    env: buildEnv(opts.env),
+    env: buildEnv(opts.env, opts.finale),
     encoding: "utf8",
     timeout: opts.timeoutMs ?? 25_000,
     maxBuffer: 16 * 1024 * 1024,
@@ -378,12 +390,12 @@ export async function orderBuyLive(
   if (opts.price != null) args.push("--price", String(opts.price));
   if (opts.validate) args.push("--validate");
   args.push("--yes");
-  return run(args, { env });
+  return run(args, { env, finale: true });
 }
 
 /** Dead-man's switch: cancel all open orders after <seconds> (0 disables). */
 export async function cancelAfter(env: AgentEnv, seconds: number): Promise<unknown> {
-  return run(["order", "cancel-after", String(seconds)], { env });
+  return run(["order", "cancel-after", String(seconds)], { env, finale: true });
 }
 
 // ─── WebSocket streaming (NDJSON) ────────────────────────────────────────────

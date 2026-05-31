@@ -1,0 +1,265 @@
+@@@ futures historical-funding-rates --help
+Get historical funding rates
+
+Usage: kraken futures historical-funding-rates [OPTIONS] <SYMBOL>
+
+Arguments:
+  <SYMBOL>  Futures symbol (e.g. PI_XBTUSD)
+
+Options:
+  -o, --output <OUTPUT>
+          Output format: table (default) or json [possible values: table, json]
+  -v, --verbose
+          Show request/response details on stderr
+      --api-url <API_URL>
+          Override Spot API base URL
+      --futures-url <FUTURES_URL>
+          Override Futures API base URL
+      --api-key <API_KEY>
+          API key override (takes precedence over env/config)
+      --api-secret <API_SECRET>
+          API secret override (prefer --api-secret-stdin for security)
+      --api-secret-stdin
+          Read API secret from stdin (mutually exclusive with --api-secret and --api-secret-file)
+      --api-secret-file <API_SECRET_FILE>
+          Path to file containing API secret (mutually exclusive with --api-secret and --api-secret-stdin)
+      --otp <OTP>
+          OTP (two-factor authentication code)
+      --yes
+          Skip confirmation prompts for destructive operations
+  -h, --help
+          Print help
+
+@@@ futures tickers --help
+Get all futures tickers
+
+Usage: kraken futures tickers [OPTIONS]
+
+Options:
+  -o, --output <OUTPUT>
+          Output format: table (default) or json [possible values: table, json]
+  -v, --verbose
+          Show request/response details on stderr
+      --api-url <API_URL>
+          Override Spot API base URL
+      --futures-url <FUTURES_URL>
+          Override Futures API base URL
+      --api-key <API_KEY>
+          API key override (takes precedence over env/config)
+      --api-secret <API_SECRET>
+          API secret override (prefer --api-secret-stdin for security)
+      --api-secret-stdin
+          Read API secret from stdin (mutually exclusive with --api-secret and --api-secret-file)
+      --api-secret-file <API_SECRET_FILE>
+          Path to file containing API secret (mutually exclusive with --api-secret and --api-secret-stdin)
+      --otp <OTP>
+          OTP (two-factor authentication code)
+      --yes
+          Skip confirmation prompts for destructive operations
+  -h, --help
+          Print help
+
+@@@ futures ticker --help
+Get ticker for a single contract
+
+Usage: kraken futures ticker [OPTIONS] <SYMBOL>
+
+Arguments:
+  <SYMBOL>  Futures symbol (e.g. PI_XBTUSD)
+
+Options:
+  -o, --output <OUTPUT>
+          Output format: table (default) or json [possible values: table, json]
+  -v, --verbose
+          Show request/response details on stderr
+      --api-url <API_URL>
+          Override Spot API base URL
+      --futures-url <FUTURES_URL>
+          Override Futures API base URL
+      --api-key <API_KEY>
+          API key override (takes precedence over env/config)
+      --api-secret <API_SECRET>
+          API secret override (prefer --api-secret-stdin for security)
+      --api-secret-stdin
+          Read API secret from stdin (mutually exclusive with --api-secret and --api-secret-file)
+      --api-secret-file <API_SECRET_FILE>
+          Path to file containing API secret (mutually exclusive with --api-secret and --api-secret-stdin)
+      --otp <OTP>
+          OTP (two-factor authentication code)
+      --yes
+          Skip confirmation prompts for destructive operations
+  -h, --help
+          Print help
+
+@@@ futures instruments --help
+List all futures instruments/contracts
+
+Usage: kraken futures instruments [OPTIONS]
+
+Options:
+  -o, --output <OUTPUT>
+          Output format: table (default) or json [possible values: table, json]
+  -v, --verbose
+          Show request/response details on stderr
+      --api-url <API_URL>
+          Override Spot API base URL
+      --futures-url <FUTURES_URL>
+          Override Futures API base URL
+      --api-key <API_KEY>
+          API key override (takes precedence over env/config)
+      --api-secret <API_SECRET>
+          API secret override (prefer --api-secret-stdin for security)
+      --api-secret-stdin
+          Read API secret from stdin (mutually exclusive with --api-secret and --api-secret-file)
+      --api-secret-file <API_SECRET_FILE>
+          Path to file containing API secret (mutually exclusive with --api-secret and --api-secret-stdin)
+      --otp <OTP>
+          OTP (two-factor authentication code)
+      --yes
+          Skip confirmation prompts for destructive operations
+  -h, --help
+          Print help
+
+@@@ futures paper init --help
+Initialize futures paper trading account
+
+Usage: kraken futures paper init [OPTIONS]
+
+Options:
+      --balance <BALANCE>
+          Starting collateral balance (default: 10000) [default: 10000]
+  -o, --output <OUTPUT>
+          Output format: table (default) or json [possible values: table, json]
+      --currency <CURRENCY>
+          Collateral currency (default: USD) [default: USD]
+  -v, --verbose
+          Show request/response details on stderr
+      --api-url <API_URL>
+          Override Spot API base URL
+      --fee-rate <FEE_RATE>
+          Fee rate as a decimal (default: 0.0005 = 0.05%)
+      --futures-url <FUTURES_URL>
+          Override Futures API base URL
+      --api-key <API_KEY>
+          API key override (takes precedence over env/config)
+      --api-secret <API_SECRET>
+          API secret override (prefer --api-secret-stdin for security)
+      --api-secret-stdin
+          Read API secret from stdin (mutually exclusive with --api-secret and --api-secret-file)
+      --api-secret-file <API_SECRET_FILE>
+          Path to file containing API secret (mutually exclusive with --api-secret and --api-secret-stdin)
+      --otp <OTP>
+          OTP (two-factor authentication code)
+      --yes
+          Skip confirmation prompts for destructive operations
+  -h, --help
+          Print help
+
+@@@ futures paper buy --help
+Place a futures paper buy (long) order
+
+Usage: kraken futures paper buy [OPTIONS] <SYMBOL> <SIZE>
+
+Arguments:
+  <SYMBOL>  Futures symbol (e.g. PF_XBTUSD)
+  <SIZE>    Order size
+
+Options:
+  -o, --output <OUTPUT>
+          Output format: table (default) or json [possible values: table, json]
+      --type <TYPE>
+          Order type (default: limit) [default: limit] [possible values: limit, market, post, stop, take-profit, ioc, trailing-stop, fok]
+      --price <PRICE>
+          Limit price
+  -v, --verbose
+          Show request/response details on stderr
+      --api-url <API_URL>
+          Override Spot API base URL
+      --stop-price <STOP_PRICE>
+          Stop/trigger price
+      --futures-url <FUTURES_URL>
+          Override Futures API base URL
+      --trigger-signal <TRIGGER_SIGNAL>
+          Trigger signal: mark, index, or last [possible values: mark, index, last]
+      --api-key <API_KEY>
+          API key override (takes precedence over env/config)
+      --client-order-id <CLIENT_ORDER_ID>
+          Client order ID
+      --api-secret <API_SECRET>
+          API secret override (prefer --api-secret-stdin for security)
+      --reduce-only
+          Reduce-only flag
+      --api-secret-stdin
+          Read API secret from stdin (mutually exclusive with --api-secret and --api-secret-file)
+      --leverage <LEVERAGE>
+          Leverage override for this order
+      --api-secret-file <API_SECRET_FILE>
+          Path to file containing API secret (mutually exclusive with --api-secret and --api-secret-stdin)
+      --trailing-stop-max-deviation <TRAILING_STOP_MAX_DEVIATION>
+          Trailing stop max deviation
+      --otp <OTP>
+          OTP (two-factor authentication code)
+      --trailing-stop-deviation-unit <TRAILING_STOP_DEVIATION_UNIT>
+          Trailing stop deviation unit (percent or quote_currency)
+      --yes
+          Skip confirmation prompts for destructive operations
+  -h, --help
+          Print help
+
+@@@ futures paper status --help
+Show futures paper account summary
+
+Usage: kraken futures paper status [OPTIONS]
+
+Options:
+  -o, --output <OUTPUT>
+          Output format: table (default) or json [possible values: table, json]
+  -v, --verbose
+          Show request/response details on stderr
+      --api-url <API_URL>
+          Override Spot API base URL
+      --futures-url <FUTURES_URL>
+          Override Futures API base URL
+      --api-key <API_KEY>
+          API key override (takes precedence over env/config)
+      --api-secret <API_SECRET>
+          API secret override (prefer --api-secret-stdin for security)
+      --api-secret-stdin
+          Read API secret from stdin (mutually exclusive with --api-secret and --api-secret-file)
+      --api-secret-file <API_SECRET_FILE>
+          Path to file containing API secret (mutually exclusive with --api-secret and --api-secret-stdin)
+      --otp <OTP>
+          OTP (two-factor authentication code)
+      --yes
+          Skip confirmation prompts for destructive operations
+  -h, --help
+          Print help
+
+@@@ futures paper positions --help
+Show open futures paper positions
+
+Usage: kraken futures paper positions [OPTIONS]
+
+Options:
+  -o, --output <OUTPUT>
+          Output format: table (default) or json [possible values: table, json]
+  -v, --verbose
+          Show request/response details on stderr
+      --api-url <API_URL>
+          Override Spot API base URL
+      --futures-url <FUTURES_URL>
+          Override Futures API base URL
+      --api-key <API_KEY>
+          API key override (takes precedence over env/config)
+      --api-secret <API_SECRET>
+          API secret override (prefer --api-secret-stdin for security)
+      --api-secret-stdin
+          Read API secret from stdin (mutually exclusive with --api-secret and --api-secret-file)
+      --api-secret-file <API_SECRET_FILE>
+          Path to file containing API secret (mutually exclusive with --api-secret and --api-secret-stdin)
+      --otp <OTP>
+          OTP (two-factor authentication code)
+      --yes
+          Skip confirmation prompts for destructive operations
+  -h, --help
+          Print help
