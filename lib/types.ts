@@ -237,9 +237,13 @@ export interface RiskEventView {
   actionTaken: string | null;
 }
 
+/** One row of the merged equity time series (for the multi-line chart). */
+export type EquityPoint = { t: number } & Record<string, number>;
+
 export interface ArenaState {
   ts: number;
   agents: AgentSnapshot[];
   events: RiskEventView[];
   auditVerified: boolean | null;
+  equitySeries: EquityPoint[];
 }

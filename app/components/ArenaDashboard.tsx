@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { AgentSnapshot, ArenaState } from "@/lib/types";
+import EquityChart, { STRATEGY_COLOR } from "./EquityChart";
 
 const STRATEGY_LABEL: Record<string, string> = {
   momentum: "Momentum",
@@ -115,21 +116,35 @@ export default function ArenaDashboard() {
         </table>
       </section>
 
+      {agents.length > 0 && (
+        <section className="mt-6 rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
+          <h2 className="mb-2 px-1 text-xs uppercase tracking-[0.15em] text-neutral-500">Equity curves</h2>
+          <EquityChart series={state?.equitySeries ?? []} agents={agents} />
+        </section>
+      )}
+
       {leader && (
-        <section className="mt-6 grid gap-4 sm:grid-cols-2">
-          {agents.map((a) => (
-            <div key={a.id} className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-4">
-              <div className="mb-1.5 flex items-center justify-between">
-                <span className="text-sm font-medium">{a.name}</span>
-                <span className="text-[11px] uppercase tracking-wide text-neutral-500">
-                  {a.lastAction ?? "—"} · thinking
-                </span>
+        <section className="mt-6">
+          <h2 className="mb-3 text-xs uppercase tracking-[0.15em] text-neutral-500">Agent thinking</h2>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {agents.map((a) => (
+              <div
+                key={a.id}
+                className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-4"
+                style={{ borderLeft: `3px solid ${STRATEGY_COLOR[a.strategy] ?? "#6b7280"}` }}
+              >
+                <div className="mb-1.5 flex items-center justify-between">
+                  <span className="text-sm font-medium">{a.name}</span>
+                  <span className="text-[11px] uppercase tracking-wide text-neutral-500">
+                    {a.lastAction ?? "—"}
+                  </span>
+                </div>
+                <p className="text-sm leading-relaxed text-neutral-300">
+                  {a.lastRationale ?? "Awaiting first decision…"}
+                </p>
               </div>
-              <p className="text-sm leading-relaxed text-neutral-300">
-                {a.lastRationale ?? "Awaiting first decision…"}
-              </p>
-            </div>
-          ))}
+            ))}
+          </div>
         </section>
       )}
 

@@ -277,6 +277,42 @@ export function getAgentSnapshots(db: DatabaseSync): AgentSnapshot[] {
   });
 }
 
+/**
+ * Merged, forward-filled, downsampled equity time series for the multi-line chart:
+ * [{ t, momentum, mean-reversion, ... }]. Reads the most recent snapshots across all
+ * agents and aligns them on event timestamps.
+ */
+export function getEquitySeries(
+  db: DatabaseSync,
+  maxPoints = 80,
+): Array<Record<string, number>> {
+  const agentIds = (db.prepare(`SELECT id FROM agents ORDER BY id`).all() as Array<{ id: string }>).map(
+    (r) => r.id,
+  );
+  if (agentIds.length === 0) return [];
+  const rows = db
+    .prepare(
+      `SELECT agent_id, ts, equity FROM equity_snapshots ORDER BY ts DESC LIMIT 800`,
+    )
+    .all() as Array<{ agent_id: string; ts: number; equity: number }>;
+  rows.reverse(); // oldest → newest
+
+  const last: Record<string, number> = {};
+  const series: Array<Record<string, number>> = [];
+  for (const r of rows) {
+    last[r.agent_id] = r.equity;
+    const point: Record<string, number> = { t: r.ts };
+    for (const id of agentIds) if (last[id] != null) point[id] = Math.round(last[id]! * 100) / 100;
+    series.push(point);
+  }
+  // Downsample to ≤ maxPoints, always keeping the latest.
+  if (series.length <= maxPoints) return series;
+  const step = Math.ceil(series.length / maxPoints);
+  const out = series.filter((_, i) => i % step === 0);
+  if (out[out.length - 1] !== series[series.length - 1]) out.push(series[series.length - 1]!);
+  return out;
+}
+
 export function getRecentRiskEvents(db: DatabaseSync, limit = 20): RiskEventView[] {
   const rows = db
     .prepare(
