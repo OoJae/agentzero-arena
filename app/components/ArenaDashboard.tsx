@@ -4,6 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import type { AgentSnapshot, ArenaState } from "@/lib/types";
 import EquityChart, { STRATEGY_COLOR } from "./EquityChart";
 import EventLog from "./EventLog";
+import ValidationPanel from "./ValidationPanel";
+import FinalePanel from "./FinalePanel";
+
+type Tab = "arena" | "validation";
 
 const STRATEGY_LABEL: Record<string, string> = {
   momentum: "Momentum",
@@ -37,6 +41,7 @@ function pct(n: number): string {
 export default function ArenaDashboard() {
   const [state, setState] = useState<ArenaState | null>(null);
   const [connected, setConnected] = useState(false);
+  const [tab, setTab] = useState<Tab>("arena");
   const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
@@ -57,6 +62,8 @@ export default function ArenaDashboard() {
   const agents = state?.agents ?? [];
   const leader = agents[0] ?? null;
   const anyBenched = agents.some((a) => a.status === "BENCHED");
+  const finale = state?.finale ?? null;
+  const finaleActive = finale != null && finale.phase !== "idle";
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-10">
@@ -85,6 +92,28 @@ export default function ArenaDashboard() {
         </div>
       </header>
 
+      <nav className="mb-6 flex gap-1 rounded-lg border border-neutral-800 bg-neutral-900/40 p-1 text-sm w-fit">
+        {(["arena", "validation"] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`rounded-md px-4 py-1.5 capitalize transition ${
+              tab === t ? "bg-neutral-700/60 text-white" : "text-neutral-400 hover:text-neutral-200"
+            }`}
+          >
+            {t}
+          </button>
+        ))}
+      </nav>
+
+      {finaleActive && finale && <FinalePanel finale={finale} />}
+
+      {tab === "validation" ? (
+        <div className="mt-2">
+          <ValidationPanel validation={state?.validation ?? []} />
+        </div>
+      ) : (
+      <>
       <section className="overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-900/40">
         <table className="w-full text-sm">
           <thead>
@@ -160,6 +189,8 @@ export default function ArenaDashboard() {
             ))}
           </div>
         </section>
+      )}
+      </>
       )}
 
       <footer className="mt-8 text-center text-xs text-neutral-600">

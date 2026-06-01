@@ -18,6 +18,7 @@ import type {
   EquitySnapshot,
   Proposal,
   RiskEventView,
+  ValidationView,
   Verdict,
 } from "./types.js";
 
@@ -110,6 +111,19 @@ export function initSchema(db: DatabaseSync): void {
       payload_json TEXT NOT NULL,
       prev_hash  TEXT NOT NULL,
       hash       TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS validation_runs (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts          INTEGER NOT NULL,
+      strategy    TEXT NOT NULL,
+      symbol      TEXT NOT NULL,
+      interval    INTEGER NOT NULL,
+      source      TEXT NOT NULL,         -- 'real' | 'synthetic'
+      train_json  TEXT NOT NULL,
+      test_json   TEXT NOT NULL,
+      train_candles INTEGER NOT NULL,
+      test_candles  INTEGER NOT NULL
     );
 
     CREATE INDEX IF NOT EXISTS idx_equity_agent_ts ON equity_snapshots(agent_id, ts);
@@ -334,4 +348,65 @@ export function getRecentRiskEvents(db: DatabaseSync, limit = 20): RiskEventView
     detail: String(r.detail),
     actionTaken: r.action_taken == null ? null : String(r.action_taken),
   }));
+}
+
+// ─── Validation runs (out-of-sample backtest results) ────────────────────────
+export function insertValidationRun(
+  db: DatabaseSync,
+  v: ValidationView,
+): void {
+  db.prepare(
+    `INSERT INTO validation_runs (ts, strategy, symbol, interval, source, train_json, test_json, train_candles, test_candles)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    v.ts,
+    v.strategy,
+    v.symbol,
+    v.interval,
+    v.source,
+    JSON.stringify(v.train),
+    JSON.stringify(v.test),
+    v.trainCandles,
+    v.testCandles,
+  );
+}
+
+/** Latest validation run per (strategy, symbol). */
+export function getLatestValidationRuns(db: DatabaseSync): ValidationView[] {
+  const rows = db
+    .prepare(
+      `SELECT v.* FROM validation_runs v
+       JOIN (SELECT strategy, symbol, MAX(ts) AS mts FROM validation_runs GROUP BY strategy, symbol) m
+         ON v.strategy = m.strategy AND v.symbol = m.symbol AND v.ts = m.mts
+       ORDER BY v.strategy, v.symbol`,
+    )
+    .all() as Array<Record<string, unknown>>;
+  return rows.map((r) => ({
+    ts: Number(r.ts),
+    strategy: String(r.strategy),
+    symbol: String(r.symbol),
+    interval: Number(r.interval),
+    source: String(r.source) as ValidationView["source"],
+    train: JSON.parse(String(r.train_json)) as ValidationView["train"],
+    test: JSON.parse(String(r.test_json)) as ValidationView["test"],
+    trainCandles: Number(r.train_candles),
+    testCandles: Number(r.test_candles),
+  }));
+}
+
+// ─── Finale state (single transient row in a tiny KV table) ──────────────────
+export function saveFinaleState(db: DatabaseSync, state: unknown): void {
+  db.exec(`CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+  db.prepare(`INSERT INTO kv (key, value) VALUES ('finale', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(
+    JSON.stringify(state),
+  );
+}
+
+export function getFinaleState<T>(db: DatabaseSync): T | null {
+  try {
+    const row = db.prepare(`SELECT value FROM kv WHERE key = 'finale'`).get() as { value: string } | undefined;
+    return row ? (JSON.parse(row.value) as T) : null;
+  } catch {
+    return null;
+  }
 }

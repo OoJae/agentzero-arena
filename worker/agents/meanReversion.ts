@@ -43,7 +43,7 @@ const ENTRY_Z = -1.0;
 const ENTRY_RSI = 35;
 const EXIT_RSI = 55;
 
-function mostOversold(featuresBySymbol: Record<string, MeanReversionFeatures>): string {
+export function mostOversold(featuresBySymbol: Record<string, MeanReversionFeatures>): string {
   let best: string | null = null;
   let bestZ = Infinity;
   for (const [sym, f] of Object.entries(featuresBySymbol)) {
@@ -55,7 +55,7 @@ function mostOversold(featuresBySymbol: Record<string, MeanReversionFeatures>): 
   return best ?? Object.keys(featuresBySymbol)[0] ?? "BTCUSD";
 }
 
-function meanReversionFallback(
+export function meanReversionFallback(
   featuresBySymbol: Record<string, MeanReversionFeatures>,
   primarySymbol: string,
   maxSize: number,

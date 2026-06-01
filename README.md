@@ -62,16 +62,41 @@ pnpm dev
 > set `ARENA_PRICE_FEED=replay` and `ARENA_ISOLATION_PROVIDER=virtual` for an offline demo, or
 > run on a host with open egress.
 
+## Validation (out-of-sample, honest)
+
+`pnpm validate` backtests the spot strategies' **exact deterministic signal logic** over **real
+Kraken OHLC** (daily, ~2yr) with a chronological **70/30 train/test split**, and reports
+out-of-sample metrics (win rate, return, Sharpe, max drawdown, profit factor) in the dashboard's
+**Validation tab**. We show the train→test degradation candidly — that honesty is the point.
+
+**Limitations (stated plainly):**
+- Kraken OHLC is capped at ~721 candles/interval; daily ⇒ ~2 years of history.
+- The backtest uses daily candles; the live agents trade a 15m cadence (regimes/lag differ).
+- Paper model: no slippage, no partial fills; Starter taker fee 0.26%; long-only spot.
+- **Funding-Carry & Macro-Hedge (perps) have no historical OHLC via the CLI** — they are validated
+  *live* in the tournament, not in the offline harness.
+
 ## Safety
 
-Paper-first by default; **no credentials, no real money** for the tournament. The live finale
-is crypto **spot/perps only** (never xStocks), tiny notional, `--validate` before every order,
-`cancel-after` armed with a heartbeat, and **withdrawals permission OFF**. Secrets live in env
-only; `.env` is git-ignored.
+Paper-first by default; **no credentials, no real money** for the tournament (the CLI wrapper
+strips `KRAKEN_API_KEY/SECRET` from every paper/market call). The live finale is crypto **spot
+only** here (never xStocks), tiny notional (hard-capped), `--validate` before the order,
+`cancel-after` armed with a heartbeat + on-screen countdown, and **withdrawals permission OFF**.
+Secrets live in env only; `.env` is git-ignored.
+
+The finale is **triple-gated**: a real order requires `--live` **and** `ARENA_FINALE_ARMED=YES`
+**and** funded credentials present — otherwise it runs a safe **rehearsal** that places no order.
+
+```bash
+pnpm tsx scripts/finale.ts                       # rehearsal (default; no funds touched)
+ARENA_FINALE_ARMED=YES pnpm tsx scripts/finale.ts --live --notional 20   # real (on your go-ahead)
+```
 
 ## Project status
 
-Phase 0 (foundations) complete; Phase 1 (one isolated agent, end-to-end) in progress. See
+Phases 0–4 complete: four isolated agents live on Kraken prices (MiMo-driven), the Risk Marshal
+(veto + bench + flatten + dead-man's switch), tamper-evident audit, out-of-sample validation, and
+the live-finale path (built + rehearsed). Remaining: rehearse + record the video (Phase 5–6). See
 `notes.md` for the running changelog and `02_BUILD_AgentZero_Arena.md` for the full plan.
 
 ## License

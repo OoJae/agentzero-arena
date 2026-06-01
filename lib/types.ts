@@ -244,10 +244,55 @@ export interface RiskEventView {
 /** One row of the merged equity time series (for the multi-line chart). */
 export type EquityPoint = { t: number } & Record<string, number>;
 
+// ─── Validation (out-of-sample backtest results) ─────────────────────────────
+export interface BacktestMetrics {
+  trades: number;
+  winRate: number;
+  avgWinPct: number;
+  avgLossPct: number;
+  profitFactor: number;
+  sharpe: number;
+  maxDrawdownPct: number;
+  totalReturnPct: number;
+}
+
+export interface ValidationView {
+  ts: number;
+  strategy: string;
+  symbol: string;
+  interval: number;
+  source: "real" | "synthetic";
+  train: BacktestMetrics;
+  test: BacktestMetrics; // out-of-sample
+  trainCandles: number;
+  testCandles: number;
+}
+
+// ─── Live finale (the closing wow) ───────────────────────────────────────────
+export type FinalePhase = "idle" | "resolving" | "validating" | "validated" | "live" | "armed" | "done" | "error";
+
+export interface FinaleState {
+  phase: FinalePhase;
+  live: boolean; // false = rehearsal
+  leader: string | null;
+  asset: string;
+  size: number;
+  notionalUsd: number;
+  validateAccepted: boolean | null;
+  fill: { price: number; size: number; fee: number } | null;
+  balanceDelta: number | null;
+  cancelAfterArmed: boolean;
+  secondsRemaining: number | null;
+  message: string;
+  updatedAt: number;
+}
+
 export interface ArenaState {
   ts: number;
   agents: AgentSnapshot[];
   events: RiskEventView[];
   auditVerified: boolean | null;
   equitySeries: EquityPoint[];
+  validation: ValidationView[];
+  finale: FinaleState | null;
 }

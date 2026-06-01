@@ -45,7 +45,7 @@ const EXIT_RETURN_THRESHOLD = -0.003; // recent downtrend to exit
 const EXIT_DRAWDOWN = -0.05; // exit if drawdown breaches this
 const MAX_ENTRY_DRAWDOWN = -0.08; // don't enter if already this far below the recent high
 
-function pickStrongest(featuresBySymbol: Record<string, MomentumFeatures>): string {
+export function pickStrongest(featuresBySymbol: Record<string, MomentumFeatures>): string {
   let best: string | null = null;
   let bestReturn = -Infinity;
   for (const [sym, f] of Object.entries(featuresBySymbol)) {
@@ -57,7 +57,7 @@ function pickStrongest(featuresBySymbol: Record<string, MomentumFeatures>): stri
   return best ?? Object.keys(featuresBySymbol)[0] ?? "BTCUSD";
 }
 
-function momentumFallback(
+export function momentumFallback(
   featuresBySymbol: Record<string, MomentumFeatures>,
   primarySymbol: string,
   maxSize: number,
