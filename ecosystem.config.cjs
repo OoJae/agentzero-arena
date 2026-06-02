@@ -18,6 +18,8 @@ module.exports = {
       args: "start",
       cwd: __dirname,
       env: { NODE_ENV: "production", PORT: "3100" },
+      exec_mode: "fork",
+      instances: 1,
       autorestart: true,
       max_restarts: 10,
       restart_delay: 3000,
@@ -34,7 +36,9 @@ module.exports = {
       autorestart: true,
       max_restarts: 20,
       restart_delay: 5000,
-      // Long-lived agent loops — never fork multiple instances.
+      // Single long-lived process — MUST be fork mode (NOT cluster); the per-agent
+      // CLI mutex assumes exactly one worker writing to ./data.
+      exec_mode: "fork",
       instances: 1,
       out_file: "./data/pm2-worker.out.log",
       error_file: "./data/pm2-worker.err.log",
