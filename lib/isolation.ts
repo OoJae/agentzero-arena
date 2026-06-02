@@ -50,7 +50,7 @@ export interface IsolationProvider {
   flatten(agent: AgentConfig): Promise<Fill[]>;
 }
 
-const SPOT_FEE_RATE = 0.0026; // Kraken Starter taker (spot paper default)
+export const SPOT_FEE_RATE = 0.0026; // Kraken Starter taker (spot paper default)
 const FUTURES_FEE_RATE = 0.0005; // futures paper default
 
 // ─── PaperCliProvider (real `kraken paper` / `kraken futures paper`) ──────────
@@ -121,10 +121,16 @@ export class PaperCliProvider implements IsolationProvider {
     }
     const s: PaperStatus = await paperStatus(env);
     let positions: Record<string, number> = {};
+    let cash: number | undefined;
     try {
-      // paper balance is keyed by ASSET (ETH, XBT, USD…) — normalize to the agent's
-      // PAIR keys (ETHUSD…) so `positions[symbol]` works for holding/exposure checks.
-      positions = normalizeSpotPositions(await paperBalance(env), agent.startingCurrency);
+      // paper balance is keyed by ASSET (ETH, XBT, USD…). Normalize to the agent's PAIR
+      // keys (ETHUSD…) so `positions[symbol]` works for holding/exposure checks, and pull
+      // the quote-currency balance out as `cash` so the Marshal can enforce affordability.
+      const byAsset = await paperBalance(env);
+      positions = normalizeSpotPositions(byAsset, agent.startingCurrency);
+      const quote = agent.startingCurrency.toUpperCase();
+      const cashVal = byAsset[quote] ?? byAsset[`Z${quote}`];
+      if (cashVal != null && Number.isFinite(cashVal)) cash = cashVal;
     } catch {
       positions = {};
     }
@@ -133,6 +139,7 @@ export class PaperCliProvider implements IsolationProvider {
       startingBalance: s.starting_balance ?? agent.startingBalance,
       trades: s.total_trades ?? 0,
       positions,
+      cash,
     };
   }
 

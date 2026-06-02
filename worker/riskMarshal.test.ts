@@ -57,6 +57,39 @@ describe("RiskMarshal.preTradeCheck", () => {
     expect(m.isBenched(agent.id)).toBe(true);
     expect(m.preTradeCheck(agent, buy, status, 100).approved).toBe(false);
   });
+
+  it("clamps a spot buy to affordable cash (no CLI rejection)", () => {
+    // cash 150 at price 100 ⇒ affordable ≈ 1.496 (after 0.26% fee), well under the position cap
+    const lowCash = { ...status, cash: 150, positions: { BTCUSD: 0.142 } };
+    const v = mk().preTradeCheck(agent, { ...buy, size: 50 }, lowCash, 100);
+    expect(v.approved).toBe(true);
+    expect(v.clampedSize).toBeLessThanOrEqual(150 / 100 + 1e-9);
+    expect(v.clampedSize * 100 * 1.0026).toBeLessThanOrEqual(150 + 1e-6);
+  });
+
+  it("vetoes a spot buy when cash is effectively zero", () => {
+    const noCash = { ...status, cash: 1e-12, positions: { BTCUSD: 0.142 } };
+    const v = mk().preTradeCheck(agent, buy, noCash, 100);
+    expect(v.approved).toBe(false);
+    expect(v.reason).toMatch(/insufficient cash/);
+  });
+
+  it("buys only what little cash affords (no CLI rejection) when cash is small", () => {
+    const tiny = { ...status, cash: 0.5, positions: { BTCUSD: 0.142 } };
+    const v = mk().preTradeCheck(agent, buy, tiny, 100);
+    expect(v.approved).toBe(true);
+    expect(v.clampedSize * 100 * 1.0026).toBeLessThanOrEqual(0.5 + 1e-9); // ≤ available cash
+  });
+
+  it("does NOT apply the cash clamp to futures buys (margin, not cash)", () => {
+    const fut: AgentConfig = { ...agent, id: "f", venue: "futures", allowedSymbols: ["PF_XBTUSD"], maxLeverage: 3 };
+    const db = mkDb();
+    upsertAgent(db, fut);
+    const m = new RiskMarshal(db, fakeIso());
+    // cash tiny but irrelevant for futures; should approve within the position cap
+    const v = m.preTradeCheck(fut, { action: "buy", symbol: "PF_XBTUSD", size: 0.01, confidence: 0.5, rationale: "x" }, { ...status, cash: 1 }, 70000);
+    expect(v.approved).toBe(true);
+  });
 });
 
 describe("RiskMarshal.postTradeMonitor", () => {

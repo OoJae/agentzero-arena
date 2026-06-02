@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { interpretResult, mapCategory, KrakenError, type RawResult } from "./kraken.js";
+import { interpretResult, mapCategory, parsePaperBalance, KrakenError, type RawResult } from "./kraken.js";
 
 function ok(stdout: string): RawResult {
   return { stdout, stderr: "", status: 0 };
@@ -64,5 +64,41 @@ describe("mapCategory", () => {
     expect(mapCategory(null, "Too Many Requests 429")).toBe("rate_limit");
     expect(mapCategory(null, "invalid signature / api key")).toBe("auth");
     expect(mapCategory(null, "unknown pair")).toBe("api");
+  });
+});
+
+describe("parsePaperBalance — verified nested shape", () => {
+  it("extracts `total` from the nested {available,reserved,total} envelope", () => {
+    const raw = {
+      balances: {
+        BTC: { available: 0.14214497, reserved: 0.0, total: 0.14214497 },
+        USD: { available: 114.9934, reserved: 0.0, total: 114.9934 },
+      },
+      mode: "paper",
+    };
+    const out = parsePaperBalance(raw);
+    expect(out.BTC).toBeCloseTo(0.14214497, 6);
+    expect(out.USD).toBeCloseTo(114.9934, 4);
+    expect(Object.keys(out).sort()).toEqual(["BTC", "USD"]);
+  });
+
+  it("does not return {} for the real shape (the bug that hid positions)", () => {
+    const out = parsePaperBalance({ balances: { ETH: { total: 2.5 }, USD: { total: 9000 } } });
+    expect(Object.keys(out).length).toBe(2);
+    expect(out.ETH).toBe(2.5);
+  });
+
+  it("tolerates plain-number values and {ASSET:qty} without a balances wrapper", () => {
+    expect(parsePaperBalance({ BTC: 0.5, USD: 100, mode: "paper" })).toEqual({ BTC: 0.5, USD: 100 });
+  });
+
+  it("tolerates an array of {asset, amount}", () => {
+    const out = parsePaperBalance([{ asset: "SOL", amount: 12 }, { asset: "USD", amount: 50 }]);
+    expect(out).toEqual({ SOL: 12, USD: 50 });
+  });
+
+  it("returns {} for junk", () => {
+    expect(parsePaperBalance(null)).toEqual({});
+    expect(parsePaperBalance("nope")).toEqual({});
   });
 });

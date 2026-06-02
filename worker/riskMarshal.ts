@@ -11,7 +11,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { appendAudit } from "../lib/audit.js";
 import { insertRiskEvent, insertTrade, setAgentStatus, updateRiskEventDetail } from "../lib/db.js";
-import type { IsolationProvider, PortfolioStatus } from "../lib/isolation.js";
+import { SPOT_FEE_RATE, type IsolationProvider, type PortfolioStatus } from "../lib/isolation.js";
 import type { AgentConfig, Proposal, Verdict } from "../lib/types.js";
 
 export interface RiskNarration {
@@ -40,6 +40,16 @@ export class RiskMarshal {
 
     // 1) single-position cap
     let size = Math.min(proposal.size, (agent.maxPositionPct * status.equity) / price);
+
+    // 1b) spot-buy affordability clamp — never emit an order the CLI will reject for
+    //     insufficient cash. Spot only (futures use margin/leverage, not cash).
+    if (agent.venue === "spot" && proposal.action === "buy" && status.cash != null) {
+      const affordable = status.cash / (price * (1 + SPOT_FEE_RATE));
+      size = Math.min(size, affordable);
+      if (size <= 1e-9) {
+        return { approved: false, reason: `insufficient cash ($${status.cash.toFixed(2)}) for ${proposal.symbol}`, clampedSize: 0 };
+      }
+    }
 
     // 2) gross-exposure cap (per proposal symbol): only constrain orders that INCREASE exposure
     const current = status.positions[proposal.symbol] ?? 0;

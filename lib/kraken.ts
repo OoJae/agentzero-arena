@@ -396,29 +396,50 @@ export async function paperStatus(env: AgentEnv): Promise<PaperStatus> {
   return (await run(["paper", "status"], { env })) as PaperStatus;
 }
 
-/** Open spot paper positions, normalized to symbol→base-units (best-effort). */
-export async function paperBalance(env: AgentEnv): Promise<Record<string, number>> {
-  const raw = await run(["paper", "balance"], { env });
+/**
+ * Pure parser for `kraken paper balance -o json`. VERIFIED shape (kraken-cli 0.3.2):
+ *   {"balances":{"BTC":{"available":0.142,"reserved":0,"total":0.142},"USD":{...}},"mode":"paper"}
+ * Each value is an OBJECT — extract `total` (fallback available/balance/amount). Also tolerates a
+ * plain-number value and an array of {asset, amount} for forward/back-compat. Returns ASSET→qty
+ * (including the quote currency, e.g. USD).
+ */
+export function parsePaperBalance(raw: unknown): Record<string, number> {
   const out: Record<string, number> = {};
-  // Shape unverified across versions; accept {balances:{ASSET:qty}} or {ASSET:qty} or [{asset,amount}].
   const obj = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   const src = (obj.balances ?? obj.assets ?? obj) as Record<string, unknown> | unknown[];
+
+  const qtyOf = (v: unknown): number => {
+    if (typeof v === "number") return v;
+    if (typeof v === "string") return Number(v);
+    if (v && typeof v === "object") {
+      const o = v as Record<string, unknown>;
+      return Number(o.total ?? o.available ?? o.balance ?? o.amount ?? o.volume ?? NaN);
+    }
+    return NaN;
+  };
+
   if (Array.isArray(src)) {
     for (const r of src) {
       if (r && typeof r === "object") {
         const o = r as Record<string, unknown>;
         const sym = String(o.asset ?? o.symbol ?? o.currency ?? "");
-        const qty = Number(o.amount ?? o.balance ?? o.volume ?? 0);
+        const qty = qtyOf(o.amount ?? o.balance ?? o.total ?? o.available ?? o.volume);
         if (sym && Number.isFinite(qty)) out[sym] = qty;
       }
     }
   } else if (src && typeof src === "object") {
     for (const [k, v] of Object.entries(src)) {
-      const qty = Number(v);
+      if (k === "mode") continue; // sibling field when src === obj (no `balances` wrapper)
+      const qty = qtyOf(v);
       if (Number.isFinite(qty)) out[k] = qty;
     }
   }
   return out;
+}
+
+/** Open spot paper balances, ASSET→units (incl. quote currency). */
+export async function paperBalance(env: AgentEnv): Promise<Record<string, number>> {
+  return parsePaperBalance(await run(["paper", "balance"], { env }));
 }
 
 // ─── Futures market data (no auth) ───────────────────────────────────────────
