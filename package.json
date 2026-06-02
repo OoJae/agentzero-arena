@@ -13,7 +13,7 @@
     "dev:worker": "tsx watch worker/index.ts",
     "worker": "tsx worker/index.ts",
     "build": "next build",
-    "start": "next start -p 3000",
+    "start": "next start -p ${PORT:-3000} -H 0.0.0.0",
     "verify-cli": "tsx scripts/verify-cli.ts",
     "audit-dump": "tsx scripts/audit-dump.ts",
     "validate": "tsx scripts/validate.ts",

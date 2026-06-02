@@ -176,15 +176,27 @@ export class PaperCliProvider implements IsolationProvider {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-/** Remove leftover *_state.json.lock files from a crashed/killed run (one worker owns the HOME). */
+/**
+ * Remove leftover *.lock files from a crashed/killed run (one worker owns the HOME).
+ * Cross-platform: the Kraken CLI stores paper state under different roots per OS —
+ * macOS uses `Library/Application Support/kraken`, Linux uses XDG (`.local/share/kraken-cli`,
+ * `.config/kraken`). We sweep all known candidates so it's correct on the Mac AND the VPS.
+ */
 function clearStaleLocks(home: string): void {
-  const dir = resolve(home, "Library", "Application Support", "kraken", "paper");
-  try {
-    for (const f of readdirSync(dir)) {
-      if (f.endsWith(".lock")) rmSync(resolve(dir, f), { force: true });
+  const candidates = [
+    resolve(home, "Library", "Application Support", "kraken", "paper"), // macOS
+    resolve(home, ".local", "share", "kraken-cli", "paper"), // Linux (XDG data)
+    resolve(home, ".local", "share", "kraken", "paper"),
+    resolve(home, ".config", "kraken", "paper"), // Linux (XDG config)
+  ];
+  for (const dir of candidates) {
+    try {
+      for (const f of readdirSync(dir)) {
+        if (f.endsWith(".lock")) rmSync(resolve(dir, f), { force: true });
+      }
+    } catch {
+      /* dir not present on this OS / not created yet — skip */
     }
-  } catch {
-    /* paper dir not created yet — nothing to clear */
   }
 }
 
