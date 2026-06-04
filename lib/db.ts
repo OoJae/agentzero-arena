@@ -258,6 +258,18 @@ export function updateRiskEventDetail(db: DatabaseSync, id: number, detail: stri
   db.prepare(`UPDATE risk_events SET detail = ? WHERE id = ?`).run(detail, id);
 }
 
+/** The most recent risk event of a given type for an agent (for de-duping repeated vetoes). */
+export function getLastRiskEvent(
+  db: DatabaseSync,
+  agentId: string,
+  type: string,
+): { ts: number; detail: string } | null {
+  const row = db
+    .prepare(`SELECT ts, detail FROM risk_events WHERE agent_id = ? AND type = ? ORDER BY ts DESC LIMIT 1`)
+    .get(agentId, type) as { ts: number; detail: string } | undefined;
+  return row ?? null;
+}
+
 // ─── Read models for the dashboard ──────────────────────────────────────────
 export function getAgentSnapshots(db: DatabaseSync): AgentSnapshot[] {
   const rows = db
@@ -299,25 +311,54 @@ export function getAgentSnapshots(db: DatabaseSync): AgentSnapshot[] {
 
 /**
  * Merged, forward-filled, downsampled equity time series for the multi-line chart:
- * [{ t, momentum, mean-reversion, ... }]. Reads the most recent snapshots across all
- * agents and aligns them on event timestamps.
+ * [{ t, momentum, mean-reversion, ... }].
+ *
+ * Selects a bounded TIME WINDOW (last `windowHours`) PER AGENT — not a global row cap —
+ * so every active agent appears even when their snapshot rates differ wildly (the bug a
+ * 2-day soak exposed: a global `LIMIT 800` captured only ~3h of the single fastest agent).
+ * Falls back to the latest snapshot per agent if the window is empty.
  */
 export function getEquitySeries(
   db: DatabaseSync,
   maxPoints = 80,
+  windowHours = Number(process.env.ARENA_CHART_HOURS ?? 6),
 ): Array<Record<string, number>> {
   const agentIds = (db.prepare(`SELECT id FROM agents ORDER BY id`).all() as Array<{ id: string }>).map(
     (r) => r.id,
   );
   if (agentIds.length === 0) return [];
-  const rows = db
-    .prepare(
-      `SELECT agent_id, ts, equity FROM equity_snapshots ORDER BY ts DESC LIMIT 800`,
-    )
-    .all() as Array<{ agent_id: string; ts: number; equity: number }>;
-  rows.reverse(); // oldest → newest
 
+  const latestTs = (db.prepare(`SELECT MAX(ts) AS mx FROM equity_snapshots`).get() as { mx: number | null }).mx;
+  if (latestTs == null) return [];
+  const since = latestTs - windowHours * 3_600_000;
+
+  // Per-agent rows within the window (bounded so a fast agent can't crowd others out),
+  // then merge by timestamp.
+  const PER_AGENT_CAP = 1000;
+  const rows: Array<{ agent_id: string; ts: number; equity: number }> = [];
+  const seedTs = new Map<string, { ts: number; equity: number }>();
+  for (const id of agentIds) {
+    const agentRows = db
+      .prepare(
+        `SELECT agent_id, ts, equity FROM equity_snapshots
+         WHERE agent_id = ? AND ts >= ? ORDER BY ts DESC LIMIT ?`,
+      )
+      .all(id, since, PER_AGENT_CAP) as Array<{ agent_id: string; ts: number; equity: number }>;
+    if (agentRows.length === 0) {
+      // No rows in the window — seed with the agent's most recent snapshot so the line still shows.
+      const last = db
+        .prepare(`SELECT ts, equity FROM equity_snapshots WHERE agent_id = ? ORDER BY ts DESC LIMIT 1`)
+        .get(id) as { ts: number; equity: number } | undefined;
+      if (last) seedTs.set(id, last);
+    } else {
+      rows.push(...agentRows);
+    }
+  }
+  rows.sort((a, b) => a.ts - b.ts); // oldest → newest
+
+  // Forward-fill across the merged timeline; seed lagging agents at their last-known value.
   const last: Record<string, number> = {};
+  for (const [id, v] of seedTs) last[id] = v.equity;
   const series: Array<Record<string, number>> = [];
   for (const r of rows) {
     last[r.agent_id] = r.equity;
@@ -325,6 +366,8 @@ export function getEquitySeries(
     for (const id of agentIds) if (last[id] != null) point[id] = Math.round(last[id]! * 100) / 100;
     series.push(point);
   }
+  if (series.length === 0) return [];
+
   // Downsample to ≤ maxPoints, always keeping the latest.
   if (series.length <= maxPoints) return series;
   const step = Math.ceil(series.length / maxPoints);

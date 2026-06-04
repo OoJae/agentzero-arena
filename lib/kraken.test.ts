@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { interpretResult, mapCategory, parsePaperBalance, KrakenError, type RawResult } from "./kraken.js";
+import { interpretResult, lockPathFromMessage, mapCategory, parsePaperBalance, KrakenError, type RawResult } from "./kraken.js";
 
 function ok(stdout: string): RawResult {
   return { stdout, stderr: "", status: 0 };
@@ -100,5 +100,18 @@ describe("parsePaperBalance — verified nested shape", () => {
   it("returns {} for junk", () => {
     expect(parsePaperBalance(null)).toEqual({});
     expect(parsePaperBalance("nope")).toEqual({});
+  });
+});
+
+describe("lockPathFromMessage — self-heal stuck futures lock", () => {
+  it("extracts the quoted .lock path from the CLI error", () => {
+    const msg = "Validation error: Futures paper state is locked by another process. Try again shortly. If a previous command crashed, remove '/root/agentzero-arena/data/agents/macro-hedge/home/.config/kraken/paper/futures_state.json.lock'.";
+    expect(lockPathFromMessage(msg)).toBe("/root/agentzero-arena/data/agents/macro-hedge/home/.config/kraken/paper/futures_state.json.lock");
+  });
+  it("falls back to an unquoted .lock path", () => {
+    expect(lockPathFromMessage("locked: /tmp/x/paper/state.json.lock now")).toBe("/tmp/x/paper/state.json.lock");
+  });
+  it("returns null when there is no lock path", () => {
+    expect(lockPathFromMessage("some other error")).toBeNull();
   });
 });

@@ -12,7 +12,14 @@
  */
 import type { DatabaseSync } from "node:sqlite";
 import { appendAudit } from "../lib/audit.js";
-import { getPeakEquity, insertDecision, insertEquitySnapshot, insertRiskEvent, insertTrade } from "../lib/db.js";
+import {
+  getLastRiskEvent,
+  getPeakEquity,
+  insertDecision,
+  insertEquitySnapshot,
+  insertRiskEvent,
+  insertTrade,
+} from "../lib/db.js";
 import type { IsolationProvider, PortfolioStatus } from "../lib/isolation.js";
 import type { PriceFeed } from "../lib/priceFeed.js";
 import type { AgentConfig, Proposal } from "../lib/types.js";
@@ -79,13 +86,24 @@ export async function runTick(def: AgentDefinition, deps: RunDeps): Promise<Tick
       ? (config.maxPositionPct * status.equity) / primaryPrice
       : 0;
 
-  const proposal = await decide({
+  let proposal = await decide({
     agent: config,
     systemPrompt: def.systemPrompt,
     context: { ...ctx.llmContext, portfolio: status },
     maxSize,
     fallback: () => ctx.fallback(maxSize, status),
   });
+
+  // Spot affordability guard (all spot agents): if a BUY can't be funded from cash,
+  // downgrade to HOLD before it ever reaches the CLI — prevents the "Insufficient USD
+  // balance" rejection spam when an agent is fully deployed (the 2-day-soak symptom).
+  if (config.venue === "spot" && proposal.action === "buy" && status.cash != null) {
+    const px = ctx.priceBySymbol[proposal.symbol] ?? primaryPrice;
+    const minCost = px * proposal.size * 1.0026; // incl. taker fee
+    if (!(status.cash > minCost) || status.cash < 1) {
+      proposal = { action: "hold", symbol: proposal.symbol, size: 0, confidence: proposal.confidence, rationale: `Holding — insufficient cash ($${status.cash.toFixed(2)}) to fund this entry.` };
+    }
+  }
 
   // ── Risk Marshal pre-trade veto (deterministic) ──
   const verdict = marshal.preTradeCheck(config, proposal, status, primaryPrice);
@@ -94,9 +112,15 @@ export async function runTick(def: AgentDefinition, deps: RunDeps): Promise<Tick
   const decisionId = insertDecision(db, config.id, ts, ctx.featuresJson, proposal, verdict);
   appendAudit(db, "decision", { agentId: config.id, ts, features: safeJson(ctx.featuresJson), proposal, verdict }, ts);
 
-  // Surface a blocked trade (not a plain hold) as a visible VETO event.
+  // Surface a blocked trade (not a plain hold) as a visible VETO event — but only when the
+  // veto reason CHANGES, so a persistent cap (e.g. "exposure cap reached") logs once, not
+  // every tick (the 2-day-soak spam). Audit still records each veto for completeness.
   if (!verdict.approved && proposal.action !== "hold") {
-    insertRiskEvent(db, config.id, ts, "VETO", `${config.name} ${proposal.action} ${proposal.symbol} vetoed — ${verdict.reason}`, null);
+    const detail = `${config.name} ${proposal.action} ${proposal.symbol} vetoed — ${verdict.reason}`;
+    const prev = getLastRiskEvent(db, config.id, "VETO");
+    if (!prev || prev.detail !== detail) {
+      insertRiskEvent(db, config.id, ts, "VETO", detail, null);
+    }
     appendAudit(db, "risk_veto", { agentId: config.id, proposal, reason: verdict.reason }, ts);
   }
 

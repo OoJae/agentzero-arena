@@ -12,7 +12,7 @@
  * Live methods exist but MUST only run during the explicit finale (see safety rules).
  */
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -241,7 +241,16 @@ async function runOnce(args: string[], opts: RunOpts = {}): Promise<unknown> {
   return interpretResult(raw, { json: opts.json });
 }
 
-/** Run with category-aware exponential backoff for retryable errors. */
+/** Extract a `…/*.lock` path from a CLI "locked by another process" message. */
+export function lockPathFromMessage(msg: string): string | null {
+  // e.g. "…remove '/root/.../paper/futures_state.json.lock'." — capture the quoted path.
+  const m = msg.match(/'([^']*\.lock)'/) ?? msg.match(/(\/\S*\.lock)/);
+  return m ? m[1]! : null;
+}
+
+/** Run with category-aware exponential backoff for retryable errors. A stale paper-state
+ *  lock ("locked by another process") is self-healed: delete the orphaned lock file and
+ *  retry, rather than spinning forever (the 2-day-soak bug). */
 async function run(args: string[], opts: RunOpts = {}): Promise<unknown> {
   let attempt = 0;
   // eslint-disable-next-line no-constant-condition
@@ -252,6 +261,19 @@ async function run(args: string[], opts: RunOpts = {}): Promise<unknown> {
       if (!(err instanceof KrakenError) || !err.retryable) throw err;
       const cap = MAX_RETRIES[err.category] ?? 3;
       if (attempt >= cap) throw err;
+
+      // Self-heal an orphaned paper-state lock before the next attempt.
+      if (/locked by another process/i.test(err.message)) {
+        const lockPath = lockPathFromMessage(err.message);
+        if (lockPath && existsSync(lockPath)) {
+          try {
+            rmSync(lockPath, { force: true });
+          } catch {
+            /* best-effort; the retry/backoff still applies */
+          }
+        }
+      }
+
       const backoff = Math.min(30_000, 1000 * 2 ** attempt);
       attempt += 1;
       await sleep(backoff);

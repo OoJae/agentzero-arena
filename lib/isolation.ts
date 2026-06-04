@@ -182,7 +182,7 @@ export class PaperCliProvider implements IsolationProvider {
  * macOS uses `Library/Application Support/kraken`, Linux uses XDG (`.local/share/kraken-cli`,
  * `.config/kraken`). We sweep all known candidates so it's correct on the Mac AND the VPS.
  */
-function clearStaleLocks(home: string): void {
+export function clearStaleLocks(home: string): void {
   const candidates = [
     resolve(home, "Library", "Application Support", "kraken", "paper"), // macOS
     resolve(home, ".local", "share", "kraken-cli", "paper"), // Linux (XDG data)
