@@ -7,6 +7,7 @@ import EventLog from "./EventLog";
 import ValidationPanel from "./ValidationPanel";
 import FinalePanel from "./FinalePanel";
 import Hero from "./Hero";
+import StatusBar from "./StatusBar";
 import type { SceneMood } from "./ArenaScene";
 import { AnimatedNumber, Reveal, SectionHead } from "./ui";
 
@@ -84,6 +85,12 @@ export default function ArenaDashboard() {
 
   return (
     <>
+      <StatusBar
+        connected={connected}
+        auditVerified={state?.auditVerified ?? null}
+        anyBenched={anyBenched}
+        leaderName={leader?.name ?? null}
+      />
       <Hero
         mood={mood}
         energy={energy}
