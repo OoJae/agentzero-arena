@@ -6,6 +6,8 @@ import EquityChart, { STRATEGY_COLOR } from "./EquityChart";
 import EventLog from "./EventLog";
 import ValidationPanel from "./ValidationPanel";
 import FinalePanel from "./FinalePanel";
+import Hero from "./Hero";
+import type { SceneMood } from "./ArenaScene";
 
 type Tab = "arena" | "validation";
 
@@ -65,33 +67,26 @@ export default function ArenaDashboard() {
   const finale = state?.finale ?? null;
   const finaleActive = finale != null && finale.phase !== "idle";
 
-  return (
-    <main className="mx-auto max-w-6xl px-6 py-10">
-      <header className="mb-8 flex items-start justify-between gap-6">
-        <div>
-          <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">Kraken CLI · Agent Zero</p>
-          <h1 className="mt-2 text-4xl font-semibold tracking-tight">
-            AgentZero <span className="text-emerald-400">Arena</span>
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm text-neutral-400">
-            Autonomous AI traders compete in capital-isolated portfolios on live Kraken prices.
-            A Risk Marshal enforces the rules in real time; the winner trades real money.
-          </p>
-        </div>
-        <div className="flex flex-col items-end gap-2">
-          <span className={`inline-flex items-center gap-1.5 text-xs ${connected ? "text-emerald-400" : "text-neutral-500"}`}>
-            <span className={`h-2 w-2 rounded-full ${connected ? "animate-pulse bg-emerald-400" : "bg-neutral-600"}`} />
-            {connected ? "LIVE" : "connecting…"}
-          </span>
-          <AuditBadge ok={state?.auditVerified ?? null} />
-          {anyBenched && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5 text-[11px] font-medium text-red-300 ring-1 ring-red-500/30">
-              ⛔ kill-switch armed
-            </span>
-          )}
-        </div>
-      </header>
+  // Drive the 3D scene from live state: benched ⇒ red, live finale ⇒ amber, else violet.
+  const mood: SceneMood = anyBenched ? "benched" : finaleActive ? "live" : "default";
+  // "energy" = recent absolute PnL spread across agents (more movement ⇒ more distortion).
+  const energy = Math.min(1, agents.reduce((m, a) => Math.max(m, Math.abs(a.pnlPct)), 0) / 8);
 
+  const dashRef = useRef<HTMLDivElement>(null);
+  const scrollToArena = () => dashRef.current?.scrollIntoView({ behavior: "smooth" });
+
+  return (
+    <>
+      <Hero
+        mood={mood}
+        energy={energy}
+        connected={connected}
+        auditVerified={state?.auditVerified ?? null}
+        anyBenched={anyBenched}
+        onScrollToArena={scrollToArena}
+      />
+
+    <main ref={dashRef} className="mx-auto max-w-6xl px-6 py-10">
       <nav className="mb-6 flex gap-1 rounded-lg border border-neutral-800 bg-neutral-900/40 p-1 text-sm w-fit">
         {(["arena", "validation"] as const).map((t) => (
           <button
@@ -197,18 +192,6 @@ export default function ArenaDashboard() {
         Paper mode · no real money. The live finale runs behind <code>--validate</code> + the dead-man&apos;s switch.
       </footer>
     </main>
-  );
-}
-
-function AuditBadge({ ok }: { ok: boolean | null }) {
-  if (ok === null) return <span className="text-[11px] text-neutral-600">audit —</span>;
-  return ok ? (
-    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-300 ring-1 ring-emerald-500/30">
-      audit verified ✓
-    </span>
-  ) : (
-    <span className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5 text-[11px] font-medium text-red-300 ring-1 ring-red-500/30">
-      audit BROKEN ✗
-    </span>
+    </>
   );
 }

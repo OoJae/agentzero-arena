@@ -23,10 +23,14 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.65.0",
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.6.1",
+    "framer-motion": "^12.40.0",
     "next": "^15.5.4",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "recharts": "^3.8.1",
+    "three": "^0.184.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
@@ -34,6 +38,7 @@
     "@types/node": "^22.10.5",
     "@types/react": "^19.1.13",
     "@types/react-dom": "^19.1.9",
+    "@types/three": "^0.184.1",
     "concurrently": "^9.1.2",
     "tailwindcss": "^4.1.13",
     "tsx": "^4.19.2",

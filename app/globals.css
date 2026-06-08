@@ -1,25 +1,136 @@
 @import "tailwindcss";
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   AgentZero Arena — design system
+   Sleek near-black canvas, electric violet/cyan accent, with trading semantics
+   (green up / red down / amber live) preserved. Bold oversized display type.
+   ───────────────────────────────────────────────────────────────────────────── */
+
 :root {
-  --background: #0a0b0f;
-  --foreground: #e7e9ee;
+  /* surfaces */
+  --bg: #06070a;            /* near-black canvas */
+  --bg-elev: #0e1014;       /* elevated surface (cards/panels) */
+  --bg-elev-2: #15171d;     /* hover / nested */
+  --line: #1c1f27;          /* hairline border */
+  --line-strong: #2a2e38;
+  --fg: #eef0f4;            /* primary text */
+  --fg-dim: #9aa0ad;        /* secondary */
+  --fg-faint: #5b6675;      /* tertiary */
+
+  /* electric accent (Kraken-leaning) */
+  --accent: #7c5cff;        /* violet */
+  --accent-2: #22d3ee;      /* cyan */
+  --accent-soft: rgba(124, 92, 255, 0.14);
+
+  /* trading semantics (do not repurpose) */
+  --up: #34d399;            /* gains / ACTIVE */
+  --down: #fb5d5d;          /* losses / BENCHED */
+  --live: #f5b53f;          /* LIVE / warnings */
+
+  /* strategy hues (mirror EquityChart STRATEGY_COLOR) */
+  --s-momentum: #34d399;
+  --s-meanrev: #60a5fa;
+  --s-funding: #fbbf24;
+  --s-macro: #f472b6;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  --color-background: var(--bg);
+  --color-foreground: var(--fg);
+  --color-bg-elev: var(--bg-elev);
+  --color-bg-elev2: var(--bg-elev-2);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-fg: var(--fg);
+  --color-fg-dim: var(--fg-dim);
+  --color-fg-faint: var(--fg-faint);
+  --color-accent: var(--accent);
+  --color-accent2: var(--accent-2);
+  --color-up: var(--up);
+  --color-down: var(--down);
+  --color-live: var(--live);
+
+  /* font families wired via next/font CSS variables (set in layout.tsx) */
+  --font-display: var(--font-display-var), "Arial Black", system-ui, sans-serif;
+  --font-sans: var(--font-sans-var), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-mono-var), ui-monospace, "SF Mono", Menlo, monospace;
 }
 
-html,
+html {
+  scroll-behavior: smooth;
+  background: var(--bg);
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--bg);
+  color: var(--fg);
   font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
 }
 
-/* Tabular numerals so the leaderboard numbers don't jitter as they tick. */
+::selection {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* ─── Type utilities ──────────────────────────────────────────────────────── */
+.font-display {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 0.92;
+}
 .tabular {
   font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+}
+/* Fluid oversized display sizes */
+.text-mega {
+  font-size: clamp(3rem, 13vw, 13rem);
+}
+.text-giant {
+  font-size: clamp(2.25rem, 7vw, 5.5rem);
+}
+.text-huge {
+  font-size: clamp(1.75rem, 4vw, 3rem);
+}
+
+/* ─── Grain overlay (subtle film texture over the whole canvas) ───────────── */
+.grain::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.04;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ─── Accent glow helper ──────────────────────────────────────────────────── */
+.glow-accent {
+  box-shadow: 0 0 0 1px var(--accent-soft), 0 0 40px -8px rgba(124, 92, 255, 0.35);
+}
+
+/* ─── Marquee (for the hero scroll cue / ticker if needed) ────────────────── */
+@keyframes scrollCue {
+  0%, 100% { transform: translateY(0); opacity: 0.4; }
+  50% { transform: translateY(6px); opacity: 1; }
+}
+.scroll-cue { animation: scrollCue 1.8s ease-in-out infinite; }
+
+@keyframes flashUp { from { background: rgba(52, 211, 153, 0.22); } to { background: transparent; } }
+@keyframes flashDown { from { background: rgba(251, 93, 93, 0.22); } to { background: transparent; } }
+.flash-up { animation: flashUp 0.6s ease-out; }
+.flash-down { animation: flashDown 0.6s ease-out; }
+
+/* ─── Reduced motion: kill animations ─────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }
