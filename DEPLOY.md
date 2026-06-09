@@ -65,8 +65,12 @@ cd ~/agentzero-arena
 git pull
 pnpm install
 pnpm build
-pm2 reload all
+pm2 restart arena-web arena-worker   # use restart, NOT reload — pm2 reload skips the tsx worker
 ```
+> The dashboard has a **"▶ run finale · rehearsal"** button (top-right of the arena) that triggers a
+> safe finale rehearsal — no real money. The worker clears the display event log + finale state on each
+> boot (`ARENA_RESET_EVENTS_ON_BOOT`, default on), so `pm2 restart arena-worker` = clean slate for filming.
+> The audit chain is never wiped.
 
 ## Operations
 - Status / logs: `pm2 status`, `pm2 logs arena-worker --lines 50`, `pm2 logs arena-web`.
