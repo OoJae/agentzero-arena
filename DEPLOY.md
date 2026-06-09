@@ -75,6 +75,18 @@ pm2 reload all
 - Demo the Risk Marshal on cue: `pnpm tsx scripts/force-breach.ts macro-hedge "drawdown breach"`
   → a loud ⛔ BENCH event; `pnpm audit-dump` still verifies.
 - Refresh validation anytime: `pnpm validate` (optionally a daily cron).
+- **Fresh tournament (reset):** stop the worker, wipe state, restart BOTH processes:
+  ```bash
+  pm2 stop arena-worker
+  rm -rf data/agents data/arena.db data/arena.db-shm data/arena.db-wal
+  pm2 restart arena-worker arena-web    # restart WEB too — it holds the old DB inode open otherwise
+  pnpm validate                          # repopulate the Validation tab
+  ```
+- **Public HTTPS:** a Cloudflare quick tunnel runs under pm2 as `arena-tunnel`
+  (`pm2 start cloudflared --name arena-tunnel -- tunnel --url http://localhost:3100`). Its
+  `*.trycloudflare.com` hostname is ephemeral (rotates on restart); grab the current one with
+  `pm2 logs arena-tunnel --nostream | grep trycloudflare`. For a stable hostname, use a named tunnel
+  with a Cloudflare-managed domain.
 
 ## Safety
 - VPS is **paper-only**: no `KRAKEN_API_KEY/SECRET` in its `.env`. The wrapper strips those from
