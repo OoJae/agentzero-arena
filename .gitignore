@@ -31,3 +31,12 @@ pnpm-debug.log*
 .vscode/*
 !.vscode/extensions.json
 .idea
+
+# internal planning / strategy docs — kept local, not public
+01_RESEARCH_Agent_Zero.md
+02_BUILD_AgentZero_Arena.md
+03_CLAUDE_CODE_MASTER_PROMPT.md
+BUILD.md
+CLAUDE.md
+notes.md
+scripts/demo-script.md

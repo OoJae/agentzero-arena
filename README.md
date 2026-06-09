@@ -52,7 +52,7 @@ SQLite ──(SSE)──► Next.js 15 dashboard (leaderboard · thought feeds �
 ```
 
 Per-agent isolation is achieved by giving each agent its own `HOME`, which relocates the
-Kraken CLI's paper state — verified empirically (see `CLAUDE.md`). The whole tournament runs
+Kraken CLI's paper state — verified empirically (see `kraken/cli-findings.json`). The whole tournament runs
 in **paper mode with no credentials**; only the live finale touches real funds, behind
 `--validate` + `cancel-after`, on the operator's explicit go-ahead.
 
@@ -128,8 +128,7 @@ ARENA_FINALE_ARMED=YES pnpm tsx scripts/finale.ts --live --notional 20   # real 
 Phases 0–4 done and deployed: four isolated agents trading live Kraken prices (MiMo-driven), the Risk
 Marshal (veto + bench + flatten + dead-man's switch), tamper-evident hash-chained audit, out-of-sample
 validation, and the live-finale path (built + rehearsed behind `--validate` + `cancel-after`). Running 24/7
-on a VPS with a redesigned dashboard. See `notes.md` for the running changelog and
-`02_BUILD_AgentZero_Arena.md` for the full build plan.
+on a VPS with a redesigned dashboard. See [`DEPLOY.md`](./DEPLOY.md) for the deployment runbook.
 
 ## License
 
