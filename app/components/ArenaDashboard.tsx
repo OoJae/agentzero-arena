@@ -8,6 +8,7 @@ import ValidationPanel from "./ValidationPanel";
 import FinalePanel from "./FinalePanel";
 import Hero from "./Hero";
 import StatusBar from "./StatusBar";
+import FinaleButton from "./FinaleButton";
 import type { SceneMood } from "./ArenaScene";
 import { AnimatedNumber, Reveal, SectionHead } from "./ui";
 
@@ -73,7 +74,10 @@ export default function ArenaDashboard() {
   const leader = agents[0] ?? null;
   const anyBenched = agents.some((a) => a.status === "BENCHED");
   const finale = state?.finale ?? null;
-  const finaleActive = finale != null && finale.phase !== "idle";
+  // "active" = a finale is currently running (drives the 3D mood + disables the button);
+  // "visible" = also show the panel for a completed/errored result.
+  const finaleActive = finale != null && !["idle", "done", "error"].includes(finale.phase);
+  const finaleVisible = finale != null && finale.phase !== "idle";
 
   // Drive the 3D scene from live state: benched ⇒ red, live finale ⇒ amber, else violet.
   const mood: SceneMood = anyBenched ? "benched" : finaleActive ? "live" : "default";
@@ -116,12 +120,15 @@ export default function ArenaDashboard() {
             </button>
           ))}
         </div>
-        <span className="hidden font-mono text-[10px] uppercase tracking-[0.3em] text-fg-faint sm:block">
-          paper mode · no real money
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="hidden font-mono text-[10px] uppercase tracking-[0.3em] text-fg-faint lg:block">
+            paper mode
+          </span>
+          <FinaleButton active={finaleActive} />
+        </div>
       </div>
 
-      {finaleActive && finale && (
+      {finaleVisible && finale && (
         <Reveal className="mb-12">
           <FinalePanel finale={finale} />
         </Reveal>

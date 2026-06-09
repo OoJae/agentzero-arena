@@ -13,11 +13,12 @@
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 import { appendAudit } from "../lib/audit.js";
-import { getDb, setAgentStatus, upsertAgent } from "../lib/db.js";
+import { clearFinaleState, clearRiskEvents, getDb, setAgentStatus, upsertAgent } from "../lib/db.js";
 import { createIsolation } from "../lib/isolation.js";
 import { createPriceFeed } from "../lib/priceFeed.js";
 import { runTick, snapshotAgent, type AgentDefinition, type RunDeps } from "./agentRunner.js";
 import { claudeDecide, narrateRiskEvent } from "./decide.js";
+import { runFinale } from "./finale.js";
 import { RiskMarshal } from "./riskMarshal.js";
 import { momentumAgent } from "./agents/momentum.js";
 import { meanReversionAgent } from "./agents/meanReversion.js";
@@ -39,6 +40,12 @@ const OHLC_INTERVAL_MIN = Number(process.env.ARENA_OHLC_INTERVAL ?? 60);
 const CANDLE_COUNT = Number(process.env.ARENA_CANDLE_COUNT ?? 50);
 const DATA_DIR = process.env.ARENA_DATA_DIR ?? "./data";
 const FORCE_BENCH_FILE = resolve(DATA_DIR, "force-bench.json");
+const FINALE_TRIGGER_FILE = resolve(DATA_DIR, "finale-trigger.json");
+// On a single-worker deployment, start each boot from a clean display state (clears
+// demo residue: BENCH/VETO/LIVE_FINALE events + transient finale panel). The audit
+// chain is NEVER wiped. Set to "0"/"false" to preserve events across restarts.
+const RESET_EVENTS_ON_BOOT = (process.env.ARENA_RESET_EVENTS_ON_BOOT ?? "1") !== "0" &&
+  (process.env.ARENA_RESET_EVENTS_ON_BOOT ?? "true").toLowerCase() !== "false";
 
 const AGENTS: AgentDefinition[] = [momentumAgent, meanReversionAgent, fundingCarryAgent, macroHedgeAgent];
 
@@ -60,6 +67,13 @@ async function main() {
     tickSeconds: TICK_SECONDS,
   });
   log("database ready (WAL)");
+
+  // Clean display state on boot (does NOT touch the audit chain).
+  if (RESET_EVENTS_ON_BOOT) {
+    clearRiskEvents(db);
+    clearFinaleState(db);
+    log("display reset: risk_events + finale state cleared (audit chain preserved)");
+  }
 
   const deps: RunDeps = {
     db,
@@ -130,6 +144,33 @@ async function main() {
     }
   }
 
+  // Operator-triggered finale REHEARSAL (the dashboard button POSTs /api/finale, which
+  // drops data/finale-trigger.json). Always rehearsal — `live:false` hard-coded here, so
+  // the web button can never place a real order. runFinale self-manages its countdown timers.
+  let finaleInFlight = false;
+  async function checkFinaleTrigger() {
+    if (!existsSync(FINALE_TRIGGER_FILE)) return;
+    let payload: { notionalUsd?: number; asset?: string };
+    try {
+      payload = JSON.parse(readFileSync(FINALE_TRIGGER_FILE, "utf8"));
+    } catch {
+      rmSync(FINALE_TRIGGER_FILE, { force: true });
+      return;
+    }
+    rmSync(FINALE_TRIGGER_FILE, { force: true });
+    if (finaleInFlight) return;
+    finaleInFlight = true;
+    log(`Finale: rehearsal triggered (~$${payload.notionalUsd ?? 20} ${payload.asset ?? "BTCUSD"})`);
+    runFinale(db, { live: false, notionalUsd: payload.notionalUsd, asset: payload.asset })
+      .catch((err) => log(`Finale error — ${(err as Error).message}`))
+      .finally(() => {
+        // allow another rehearsal after the segment self-completes (~75s)
+        setTimeout(() => {
+          finaleInFlight = false;
+        }, 80_000);
+      });
+  }
+
   // Fast loop: equity snapshots (NO LLM) + the Marshal's drawdown monitor.
   let snapshotBusy = false;
   async function snapshotTick() {
@@ -137,6 +178,7 @@ async function main() {
     snapshotBusy = true;
     try {
       await checkForceBench();
+      await checkFinaleTrigger();
       for (const def of AGENTS) {
         const id = def.config.id;
         if (busy.has(id) || marshal.isBenched(id)) continue;

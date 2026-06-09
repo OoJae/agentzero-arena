@@ -453,3 +453,21 @@ export function getFinaleState<T>(db: DatabaseSync): T | null {
     return null;
   }
 }
+
+/** Clear the transient finale state (the FinalePanel disappears). */
+export function clearFinaleState(db: DatabaseSync): void {
+  try {
+    db.prepare(`DELETE FROM kv WHERE key = 'finale'`).run();
+  } catch {
+    /* kv table may not exist yet — nothing to clear */
+  }
+}
+
+/**
+ * Clear the DISPLAY risk-event log (BENCH/VETO/LIVE_FINALE rows). Does NOT touch the
+ * tamper-evident `audit_log` (the hash-chained spine stays intact). Used on a clean
+ * worker boot so demo residue doesn't linger.
+ */
+export function clearRiskEvents(db: DatabaseSync): void {
+  db.prepare(`DELETE FROM risk_events`).run();
+}
